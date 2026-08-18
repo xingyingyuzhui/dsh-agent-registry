@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defaultDshHome, loadRegistry, loadRegistrySync, registryFile, saveRegistry } from './registry-store.mjs'
 import { defaultsFile, loadDefaultsSync } from '../dsh-agent-policy/policy-store.mjs'
-import { aliasClawPresetId, clearClawDefault, normalizePolicy } from './registry-presets.mjs'
+import { clearClawDefault, normalizePolicy } from './registry-presets.mjs'
 import { archiveAgent, explainAgent, identityPaths, listProjected, renameAgent, restoreAgent, syncBindings, updateAgentModel, updateAgentPolicy, updateAgentSkills } from './registry-logic.mjs'
 import { listModelCatalog, normalizeModel, selectionForCurrentSession } from './registry-model.mjs'
 import {
@@ -135,28 +135,6 @@ async function removePreset(ctx, id) {
   } catch { /* already gone or shipped */ }
 }
 
-function pinClawPresetAlias(ctx) {
-  const presets = ctx.agentPresets
-  if (!presets || typeof presets.resolve !== 'function') return function () {}
-  const origResolve = presets.resolve.bind(presets)
-  presets.resolve = async function resolve(id) {
-    return origResolve(aliasClawPresetId(id, presets.defaultId || 'standard'))
-  }
-  return function () {
-    if (presets.resolve !== origResolve) presets.resolve = origResolve
-  }
-}
-
-function warmOfficialStandard(ctx) {
-  const presets = ctx.agentPresets
-  if (!presets || typeof presets.standingKeyFor !== 'function') return Promise.resolve()
-  return Promise.resolve(presets.standingKeyFor('standard')).catch((error) => {
-    if (ctx.logger && typeof ctx.logger.warn === 'function') {
-      ctx.logger.warn('dsh-agent-registry: could not warm official standard: ' + (error && error.message ? error.message : error))
-    }
-  })
-}
-
 async function provisionPresets(ctx, registry) {
   await guardClawDefault(ctx)
   return registry
@@ -188,10 +166,7 @@ export function apply(ctx) {
     }
   }
 
-  // Alias wa-* through resolve only. Do not wrap mount/recompose: those
-  // mint standing trees from the roster selfCtx, and a caller shadow
-  // makes every tool row fail with "agents without inject".
-  const optionalStops = [pinClawPresetAlias(ctx)]
+  const optionalStops = []
   if (typeof ctx.inject === 'function') {
     ctx.inject(['agentDefaultModel'], (sub) => {
       const stop = pinAgentDefaultModel(sub)
@@ -417,10 +392,7 @@ export function apply(ctx) {
     }),
   ]
 
-  // Warm official standard after apply returns so resume can join it.
-  const timer = setTimeout(() => { void warmOfficialStandard(ctx) }, 0)
   ctx.effect(() => () => {
-    clearTimeout(timer)
     for (const dispose of routes) {
       if (typeof dispose === 'function') dispose()
     }

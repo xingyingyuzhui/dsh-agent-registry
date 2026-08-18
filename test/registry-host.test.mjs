@@ -102,39 +102,30 @@ test('list handler does not bind ordinary workspaces', async () => {
   assert.match(payload.clawHome, /DSclaw/)
 })
 
-test('host aliases claw resolve to standard and warms official standing mount', async () => {
-  const seen = []
-  const warmed = []
+test('host does not wrap agentPresets composition APIs', () => {
+  const resolve = async (id) => ({ id })
   const mount = async () => ({})
   const recompose = async () => ({})
+  const standingKeyFor = async (id) => ({ agentPreset: id })
   const ctx = {
     workspaceRegistry: { list() { return [] } },
     agentPresets: {
       defaultId: 'standard',
       authorable: true,
-      async list() { return [{ id: 'standard' }, { id: 'wa-test2' }] },
-      async resolve(id) {
-        seen.push(id)
-        return { id }
-      },
-      async standingKeyFor(id) {
-        warmed.push(id)
-        return { agentPreset: id }
-      },
+      async list() { return [{ id: 'standard' }] },
+      resolve,
       mount,
       recompose,
+      standingKeyFor,
       async copy() {},
     },
     webServer: { register() { return () => {} } },
     effect(factory) { ctx._stop = factory() },
   }
   apply(ctx)
-  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(ctx.agentPresets.resolve, resolve)
   assert.equal(ctx.agentPresets.mount, mount)
   assert.equal(ctx.agentPresets.recompose, recompose)
-  assert.deepEqual(warmed, ['standard'])
-  assert.deepEqual(await ctx.agentPresets.resolve('wa-test2'), { id: 'standard' })
-  assert.deepEqual(await ctx.agentPresets.resolve('standard'), { id: 'standard' })
-  assert.deepEqual(seen, ['standard', 'standard'])
+  assert.equal(ctx.agentPresets.standingKeyFor, standingKeyFor)
   ctx._stop()
 })
