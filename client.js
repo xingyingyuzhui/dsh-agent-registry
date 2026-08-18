@@ -468,7 +468,7 @@ const COPY = {
     resetConfirm: '重置',
     saved: '已保存',
     modelDefault: '默认模型',
-    modelHint: '只定这个 Agent 的默认模型。空白新会话用它；会话里仍可用官方选择器临时换。不改「设置 → 模型」。',
+    modelHint: '只定这个 Agent 的默认模型。只有空白 Claw 会话会用它。换模型走官方选择器，不改「设置 → 模型」。',
     modelInherit: '跟随官方默认',
     modelOfficial: '官方默认',
     modelEmpty: '还没有可用模型',
@@ -622,7 +622,7 @@ const COPY = {
     resetConfirm: 'Reset',
     saved: 'Saved',
     modelDefault: 'Default model',
-    modelHint: 'Default for this agent only. Blank sessions use it; the official picker can still change one session. Settings → Models is unchanged.',
+    modelHint: 'Default for this agent only. Blank Claw sessions use it. Changing the model uses the official picker. Settings → Models is unchanged.',
     modelInherit: 'Follow official default',
     modelOfficial: 'Official default',
     modelEmpty: 'No models available',
@@ -1131,13 +1131,30 @@ function findClawAgent(registry, query) {
     if (!row || row.status === 'archived') continue
     if (cwd && row.canonicalRoot === cwd) return row
   }
-  if (preset) {
+  if (preset && isClawPresetId(preset)) {
     for (const row of rows) {
       if (!row || row.status === 'archived') continue
       if (row.dshPreset === preset) return row
     }
   }
   return null
+}
+
+function currentClawBlankHint(snap) {
+  if (!snap || !snap.current || !snap.byId) return null
+  const row = snap.byId[snap.current]
+  if (!row || row.blank !== true) return null
+  const cwd = row.cwd || row.path || ''
+  if (!isDsClawPath(cwd)) return null
+  return { cwd, preset: row.agentPreset || '' }
+}
+
+function selectionForCurrentSession(registry, official, snap) {
+  const hint = currentClawBlankHint(snap)
+  if (!hint) return official
+  const row = findClawAgent(registry, hint)
+  const claw = row ? normalizeModel(row.model) : null
+  return claw || official
 }
 
 function modelOfAgent(registry, agent) {

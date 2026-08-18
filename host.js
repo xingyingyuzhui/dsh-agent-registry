@@ -4,7 +4,7 @@ import { defaultDshHome, loadRegistry, loadRegistrySync, registryFile, saveRegis
 import { defaultsFile, loadDefaultsSync } from '../dsh-agent-policy/policy-store.mjs'
 import { aliasClawPresetId, clearClawDefault, normalizePolicy } from './registry-presets.mjs'
 import { archiveAgent, explainAgent, identityPaths, listProjected, renameAgent, restoreAgent, syncBindings, updateAgentModel, updateAgentPolicy, updateAgentSkills } from './registry-logic.mjs'
-import { listModelCatalog, modelOfAgent, normalizeModel, resolveBlankSelection } from './registry-model.mjs'
+import { listModelCatalog, normalizeModel, selectionForCurrentSession } from './registry-model.mjs'
 import {
   bindCreatedAgent,
   clawHome,
@@ -86,68 +86,21 @@ function optionalService(ctx, key) {
   return undefined
 }
 
-function wrapMethod(obj, key, wrapper) {
-  if (!obj || typeof obj[key] !== 'function') return function () {}
-  const orig = obj[key]
-  obj[key] = function wrapped(...args) {
-    return wrapper.call(this, orig, ...args)
-  }
-  return function () {
-    if (obj[key] !== orig) obj[key] = orig
-  }
-}
-
 function pinAgentDefaultModel(ctx) {
   const defaults = optionalService(ctx, 'agentDefaultModel')
-  const agents = optionalService(ctx, 'agents')
   if (!defaults || typeof defaults.currentSelection !== 'function') return function () {}
-  const stack = []
-  let lastGet = null
-  const peek = () => (stack.length ? stack[stack.length - 1] : lastGet)
   const official = defaults.currentSelection.bind(defaults)
   officialSelection = official
   defaults.currentSelection = function currentSelection() {
-    const agent = peek()
-    const claw = modelOfAgent(loadRegistrySync(registryFile(dshHome)), agent)
-    return resolveBlankSelection(agent, official(), claw)
+    const sessions = optionalService(ctx, 'sessions')
+    const snap = sessions && sessions.list && typeof sessions.list.getSnapshot === 'function'
+      ? sessions.list.getSnapshot()
+      : null
+    return selectionForCurrentSession(loadRegistrySync(registryFile(dshHome)), official(), snap)
   }
-  const stopGet = wrapMethod(agents, 'get', function (orig, id) {
-    const agent = orig.call(this, id)
-    if (agent) lastGet = agent
-    return agent
-  })
-  function track(agent, next) {
-    if (typeof next !== 'function') return undefined
-    if (agent) stack.push(agent)
-    const done = () => {
-      if (agent && stack[stack.length - 1] === agent) stack.pop()
-    }
-    try {
-      const result = next()
-      return Promise.resolve(result).then((value) => {
-        done()
-        return value
-      }, (error) => {
-        done()
-        throw error
-      })
-    } catch (error) {
-      done()
-      throw error
-    }
-  }
-  const stopPre = typeof ctx.on === 'function'
-    ? ctx.on('agent/pre-step', (payload, next) => track(payload && payload.agent, next))
-    : function () {}
-  const stopAssemble = typeof ctx.on === 'function'
-    ? ctx.on('system-prompt/assemble', (_assembly, context, next) => track(context && context.agent, next))
-    : function () {}
   return function () {
     defaults.currentSelection = official
     officialSelection = () => null
-    stopGet()
-    if (typeof stopPre === 'function') stopPre()
-    if (typeof stopAssemble === 'function') stopAssemble()
   }
 }
 
@@ -230,7 +183,7 @@ export function apply(ctx) {
   // makes every tool row fail with "agents without inject".
   const optionalStops = [pinClawPresetAlias(ctx)]
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['agentDefaultModel', 'agents'], (sub) => {
+    ctx.inject(['agentDefaultModel'], (sub) => {
       const stop = pinAgentDefaultModel(sub)
       sub.effect(() => () => stop())
     })

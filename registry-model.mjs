@@ -1,3 +1,6 @@
+import { isDsClawPath } from './registry-view.mjs'
+import { isClawPresetId } from './registry-presets.mjs'
+
 export function normalizeModel(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const provider = typeof raw.provider === 'string' ? raw.provider.trim() : ''
@@ -32,13 +35,30 @@ export function findClawAgent(registry, query) {
     if (!row || row.status === 'archived') continue
     if (cwd && row.canonicalRoot === cwd) return row
   }
-  if (preset) {
+  if (preset && isClawPresetId(preset)) {
     for (const row of rows) {
       if (!row || row.status === 'archived') continue
       if (row.dshPreset === preset) return row
     }
   }
   return null
+}
+
+export function currentClawBlankHint(snap) {
+  if (!snap || !snap.current || !snap.byId) return null
+  const row = snap.byId[snap.current]
+  if (!row || row.blank !== true) return null
+  const cwd = row.cwd || row.path || ''
+  if (!isDsClawPath(cwd)) return null
+  return { cwd, preset: row.agentPreset || '' }
+}
+
+export function selectionForCurrentSession(registry, official, snap) {
+  const hint = currentClawBlankHint(snap)
+  if (!hint) return official
+  const row = findClawAgent(registry, hint)
+  const claw = row ? normalizeModel(row.model) : null
+  return claw || official
 }
 
 export function modelOfAgent(registry, agent) {

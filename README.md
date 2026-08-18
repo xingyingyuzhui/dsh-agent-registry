@@ -32,7 +32,7 @@ dsh plugin --profile web add link:/abs/path/to/dsh-agent-registry
 - Main 里四个官方预设照旧切换；Claw 会话只能跑自己的 `wa-*` 预设，不能再切模式
 - Claw 预设不会出现在官方「Agent 预设」的「当前使用」里
 - Claw Agent 的权限各面在本页的「权限」tab 可单独改并保存（仍不强制）
-- 「模型」tab 给这个 Agent 指定默认模型；空白新会话用它，不改官方「设置 → 模型」。会话里仍可用官方选择器临时换
+- 「模型」tab 给这个 Agent 指定默认模型；只有 **空白** Claw 会话读官方当前模型时才用它。换模型走官方选择器，不改「设置 → 模型」，也不另挂预设
 - 新绑定默认套用 **research** 只读声明，`enforced: false`
 - 删除 = 归档绑定，不删项目目录、不删会话日志
 - 绑定写在 `~/.dsh/workspace-agents/registry.json`

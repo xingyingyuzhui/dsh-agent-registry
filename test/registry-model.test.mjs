@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  currentClawBlankHint,
   effortLabel,
   findCatalogModel,
   findClawAgent,
@@ -9,6 +10,7 @@ import {
   modelOfAgent,
   normalizeModel,
   resolveBlankSelection,
+  selectionForCurrentSession,
 } from '../registry-model.mjs'
 import { emptyRegistry, ensureBinding, setAgentModel } from '../registry-store.mjs'
 
@@ -38,6 +40,42 @@ test('modelOfAgent matches cwd to the registry row', () => {
   const agent = { session: { header: { cwd: '/tmp/claw' } } }
   assert.deepEqual(modelOfAgent(next.registry, agent), { provider: 'deepseek', model: 'deepseek-chat' })
   assert.equal(findClawAgent(next.registry, { cwd: '/nope' }), null)
+  assert.equal(findClawAgent(next.registry, { preset: 'standard' }), null)
+})
+
+test('selectionForCurrentSession only pins blank DSclaw sessions', () => {
+  const bound = ensureBinding(emptyRegistry(), {
+    id: 'ws',
+    path: '/Users/qin/.dsh/DSclaw/test2',
+    title: 'test2',
+  })
+  const registry = setAgentModel(bound.registry, bound.agent.agentId, {
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+  }).registry
+  const official = { provider: 'off', model: 'default' }
+  const claw = { provider: 'deepseek', model: 'deepseek-chat' }
+  const blank = {
+    current: 's1',
+    byId: { s1: { blank: true, cwd: '/Users/qin/.dsh/DSclaw/test2', agentPreset: 'standard' } },
+  }
+  const spoken = {
+    current: 's1',
+    byId: { s1: { blank: false, cwd: '/Users/qin/.dsh/DSclaw/test2', agentPreset: 'standard' } },
+  }
+  const officialBlank = {
+    current: 's2',
+    byId: { s2: { blank: true, cwd: '/Users/qin/DSH', agentPreset: 'standard' } },
+  }
+  assert.deepEqual(currentClawBlankHint(blank), {
+    cwd: '/Users/qin/.dsh/DSclaw/test2',
+    preset: 'standard',
+  })
+  assert.equal(currentClawBlankHint(spoken), null)
+  assert.equal(currentClawBlankHint(officialBlank), null)
+  assert.deepEqual(selectionForCurrentSession(registry, official, blank), claw)
+  assert.deepEqual(selectionForCurrentSession(registry, official, spoken), official)
+  assert.deepEqual(selectionForCurrentSession(registry, official, officialBlank), official)
 })
 
 test('catalog lookup and effort labels', () => {
