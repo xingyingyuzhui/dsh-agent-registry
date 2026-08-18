@@ -16,6 +16,7 @@ import {
   ensureTemplateNamed,
   openPersonaYaml,
   INIT_PRESET,
+  aliasClawPresetId,
   fallbackMissingPreset,
   isClawPresetId,
   presetIdForWorkspace,
@@ -427,6 +428,9 @@ test('missing claw presets fall back to standard; live and shipped ids stay', ()
   assert.equal(fallbackMissingPreset('', live), '')
   assert.equal(fallbackMissingPreset(undefined, live), undefined)
   assert.equal(fallbackMissingPreset('wa-gone', live, 'minimal'), 'minimal')
+  assert.equal(aliasClawPresetId('wa-test2'), 'standard')
+  assert.equal(aliasClawPresetId('standard'), 'standard')
+  assert.equal(aliasClawPresetId('wa-template', 'wa-template'), 'standard')
 })
 
 test('workspace sessions wearing a missing claw preset are reset to standard', () => {
@@ -450,19 +454,19 @@ test('workspace sessions wearing a missing claw preset are reset to standard', (
   })
   assert.equal(already.action, 'idle')
   const claw = nextPresetBind({
+    row: { blank: true, cwd: '/Users/qin/.dsh/DSclaw/test1', agentPreset: 'wa-test1' },
+    agent: { workspaceId: 'w1', dshPreset: 'wa-test1' },
+    pending: null,
+    liveIds: live,
+  })
+  assert.deepEqual(claw, { action: 'select', preset: 'standard', pending: null })
+  const clawIdle = nextPresetBind({
     row: { blank: true, cwd: '/Users/qin/.dsh/DSclaw/test1', agentPreset: 'standard' },
     agent: { workspaceId: 'w1', dshPreset: 'wa-test1' },
     pending: null,
     liveIds: live,
   })
-  assert.deepEqual(claw, { action: 'select', preset: 'wa-test1', pending: null })
-  const missing = nextPresetBind({
-    row: { blank: true, cwd: '/Users/qin/.dsh/DSclaw/test1', agentPreset: 'standard' },
-    agent: { workspaceId: 'w1', dshPreset: 'wa-missing' },
-    pending: null,
-    liveIds: live,
-  })
-  assert.deepEqual(missing, { action: 'select', preset: 'standard', pending: null })
+  assert.equal(clawIdle.action, 'idle')
 })
 
 test('official pickers drop claw roster rows before render', () => {

@@ -65,6 +65,12 @@ export function fallbackMissingPreset(id, liveIds, defaultId = 'standard') {
   return id
 }
 
+export function aliasClawPresetId(id, defaultId = 'standard') {
+  if (!isClawPresetId(id)) return id
+  const fallback = defaultId || 'standard'
+  return isClawPresetId(fallback) ? 'standard' : fallback
+}
+
 export function rewriteTemplatePresetYaml(text, name) {
   const line = 'name: ' + name
   if (typeof text !== 'string' || text === '') return line + '\n'

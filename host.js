@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defaultDshHome, loadRegistry, loadRegistrySync, registryFile, saveRegistry } from './registry-store.mjs'
 import { defaultsFile, loadDefaultsSync } from '../dsh-agent-policy/policy-store.mjs'
-import { clearClawDefault, ensureGeneratedPreset, ensureOpenPersona, ensureTemplateNamed, normalizePolicy, rewriteIsolatedMinimalClones } from './registry-presets.mjs'
+import { aliasClawPresetId, clearClawDefault, normalizePolicy } from './registry-presets.mjs'
 import { archiveAgent, explainAgent, identityPaths, listProjected, renameAgent, restoreAgent, syncBindings, updateAgentModel, updateAgentPolicy, updateAgentSkills } from './registry-logic.mjs'
 import { listModelCatalog, modelOfAgent, normalizeModel, resolveBlankSelection } from './registry-model.mjs'
 import {
@@ -182,32 +182,21 @@ async function removePreset(ctx, id) {
   } catch { /* already gone or shipped */ }
 }
 
-async function provisionPresets(ctx, registry, workspaces) {
+function pinClawPresetAlias(ctx) {
   const presets = ctx.agentPresets
-  if (presets == null || typeof presets.copy !== 'function') return registry
-  const next = registry
-  for (const agent of Object.values(next.agents)) {
-    if (agent == null || agent.status === 'archived') continue
-    const id = agent.dshPreset
-    if (!id) continue
-    try {
-      await ensureGeneratedPreset(presets, { id, name: agent.title || id })
-    } catch (error) {
-      if (ctx.logger && typeof ctx.logger.warn === 'function') {
-        ctx.logger.warn('dsh-agent-registry: preset provision failed: ' + (error && error.message ? error.message : error))
-      }
-    }
+  if (!presets || typeof presets.resolve !== 'function') return function () {}
+  const origResolve = presets.resolve.bind(presets)
+  presets.resolve = async function resolve(id) {
+    return origResolve(aliasClawPresetId(id, presets.defaultId || 'standard'))
   }
-  try {
-    await ensureTemplateNamed(presets, { readFile, writeFile })
-    await ensureOpenPersona(presets, { readFile, writeFile })
-  } catch (error) {
-    if (ctx.logger && typeof ctx.logger.warn === 'function') {
-      ctx.logger.warn('dsh-agent-registry: template rename failed: ' + (error && error.message ? error.message : error))
-    }
+  return function () {
+    if (presets.resolve !== origResolve) presets.resolve = origResolve
   }
+}
+
+async function provisionPresets(ctx, registry) {
   await guardClawDefault(ctx)
-  return next
+  return registry
 }
 
 async function readSynced(ctx) {
@@ -236,10 +225,10 @@ export function apply(ctx) {
     }
   }
 
-  // Do not wrap agentPresets.mount/resolve/recompose. Official standing
-  // mounts must be created from the roster's untraced selfCtx; a caller
-  // shadow (resume, HTTP) makes every row fail with "agents without inject".
-  const optionalStops = []
+  // Alias wa-* through resolve only. Do not wrap mount/recompose: those
+  // mint standing trees from the roster selfCtx, and a caller shadow
+  // makes every tool row fail with "agents without inject".
+  const optionalStops = [pinClawPresetAlias(ctx)]
   if (typeof ctx.inject === 'function') {
     ctx.inject(['agentDefaultModel', 'agents'], (sub) => {
       const stop = pinAgentDefaultModel(sub)
@@ -340,7 +329,6 @@ export function apply(ctx) {
         }
         const workspace = await ctx.workspaceRegistry.create(path, title)
         const dshPreset = 'wa-' + slug
-        await ensureGeneratedPreset(ctx.agentPresets, { id: dshPreset, name: title })
         const bound = bindCreatedAgent(loaded, {
           workspaceId: workspace.id,
           slug,
@@ -476,9 +464,4 @@ export function apply(ctx) {
   })
 
   void guardClawDefault(ctx)
-  void rewriteIsolatedMinimalClones(ctx.agentPresets, { readFile, writeFile }).catch((error) => {
-    if (ctx.logger && typeof ctx.logger.warn === 'function') {
-      ctx.logger.warn('dsh-agent-registry: preset rewrite failed: ' + (error && error.message ? error.message : error))
-    }
-  })
 }

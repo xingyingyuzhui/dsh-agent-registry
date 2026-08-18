@@ -190,27 +190,14 @@ export function isClawBoundSession(row, agent) {
   return isDsClawPath(row && (row.cwd || row.path))
 }
 
-export function nextPresetBind({ row, agent, pending, liveIds }) {
-  const live = liveIds instanceof Set ? liveIds : new Set(liveIds || [])
+export function nextPresetBind({ row, agent }) {
   if (!row) return { action: 'idle', pending: null }
-  if (!isClawBoundSession(row, agent)) {
-    if (row.blank && isClawPresetId(row.agentPreset)) {
-      return { action: 'select', preset: 'standard', pending: null }
-    }
-    return { action: 'idle', pending: null }
+  // wa-* is a registry label, not a standing composition. Blank sessions
+  // join official standard; resume of a named wa-* is aliased in resolve.
+  if (row.blank && (isClawPresetId(row.agentPreset) || (isClawBoundSession(row, agent) && !row.agentPreset))) {
+    return { action: 'select', preset: 'standard', pending: null }
   }
-  const preset = (pending && pending.preset) || boundPresetOf(agent)
-  if (!preset || (live.size > 0 && !live.has(preset))) {
-    if (live.size > 0) return { action: 'select', preset: 'standard', pending: null }
-    return { action: 'idle', pending: null }
-  }
-  if (!row.blank || row.agentPreset === preset) {
-    return { action: 'idle', pending: null }
-  }
-  if (pending && agent && pending.workspaceId && String(pending.workspaceId) !== String(agent.workspaceId)) {
-    return { action: 'idle', pending: null }
-  }
-  return { action: 'select', preset, pending: pending || null }
+  return { action: 'idle', pending: null }
 }
 
 export function isOfficialSectionLabel(text) {

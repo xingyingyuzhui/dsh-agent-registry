@@ -158,10 +158,10 @@ export function apply(ctx) {
       if (!workspaceId) return
       const agents = (projected && projected.agents) || []
       const agent = agents.find((row) => row && String(row.workspaceId) === String(workspaceId))
-      if (agent && agent.dshPreset) pendingBind = { workspaceId: String(workspaceId), preset: agent.dshPreset }
+      pendingBind = { workspaceId: String(workspaceId), preset: 'standard' }
       const api = connectionApi()
-      if (api && api.sessions && typeof api.sessions.create === 'function' && agent && agent.dshPreset) {
-        Promise.resolve(api.sessions.create({ workspaceId, agentPreset: agent.dshPreset })).then((res) => {
+      if (api && api.sessions && typeof api.sessions.create === 'function' && agent) {
+        Promise.resolve(api.sessions.create({ workspaceId, agentPreset: 'standard' })).then((res) => {
           const value = res && res.result && res.result.ok === true ? res.result.value : null
           const id = value && value.sessionId
           if (id && ctx.sessions && typeof ctx.sessions.open === 'function') ctx.sessions.open(id)

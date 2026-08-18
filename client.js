@@ -983,6 +983,12 @@ function fallbackMissingPreset(id, liveIds, defaultId = 'standard') {
   return id
 }
 
+function aliasClawPresetId(id, defaultId = 'standard') {
+  if (!isClawPresetId(id)) return id
+  const fallback = defaultId || 'standard'
+  return isClawPresetId(fallback) ? 'standard' : fallback
+}
+
 function rewriteTemplatePresetYaml(text, name) {
   const line = 'name: ' + name
   if (typeof text !== 'string' || text === '') return line + '\n'
@@ -1409,27 +1415,14 @@ function isClawBoundSession(row, agent) {
   return isDsClawPath(row && (row.cwd || row.path))
 }
 
-function nextPresetBind({ row, agent, pending, liveIds }) {
-  const live = liveIds instanceof Set ? liveIds : new Set(liveIds || [])
+function nextPresetBind({ row, agent }) {
   if (!row) return { action: 'idle', pending: null }
-  if (!isClawBoundSession(row, agent)) {
-    if (row.blank && isClawPresetId(row.agentPreset)) {
-      return { action: 'select', preset: 'standard', pending: null }
-    }
-    return { action: 'idle', pending: null }
+  // wa-* is a registry label, not a standing composition. Blank sessions
+  // join official standard; resume of a named wa-* is aliased in resolve.
+  if (row.blank && (isClawPresetId(row.agentPreset) || (isClawBoundSession(row, agent) && !row.agentPreset))) {
+    return { action: 'select', preset: 'standard', pending: null }
   }
-  const preset = (pending && pending.preset) || boundPresetOf(agent)
-  if (!preset || (live.size > 0 && !live.has(preset))) {
-    if (live.size > 0) return { action: 'select', preset: 'standard', pending: null }
-    return { action: 'idle', pending: null }
-  }
-  if (!row.blank || row.agentPreset === preset) {
-    return { action: 'idle', pending: null }
-  }
-  if (pending && agent && pending.workspaceId && String(pending.workspaceId) !== String(agent.workspaceId)) {
-    return { action: 'idle', pending: null }
-  }
-  return { action: 'select', preset, pending: pending || null }
+  return { action: 'idle', pending: null }
 }
 
 function isOfficialSectionLabel(text) {
@@ -4002,10 +3995,10 @@ function apply(ctx) {
       if (!workspaceId) return
       const agents = (projected && projected.agents) || []
       const agent = agents.find((row) => row && String(row.workspaceId) === String(workspaceId))
-      if (agent && agent.dshPreset) pendingBind = { workspaceId: String(workspaceId), preset: agent.dshPreset }
+      pendingBind = { workspaceId: String(workspaceId), preset: 'standard' }
       const api = connectionApi()
-      if (api && api.sessions && typeof api.sessions.create === 'function' && agent && agent.dshPreset) {
-        Promise.resolve(api.sessions.create({ workspaceId, agentPreset: agent.dshPreset })).then((res) => {
+      if (api && api.sessions && typeof api.sessions.create === 'function' && agent) {
+        Promise.resolve(api.sessions.create({ workspaceId, agentPreset: 'standard' })).then((res) => {
           const value = res && res.result && res.result.ok === true ? res.result.value : null
           const id = value && value.sessionId
           if (id && ctx.sessions && typeof ctx.sessions.open === 'function') ctx.sessions.open(id)
