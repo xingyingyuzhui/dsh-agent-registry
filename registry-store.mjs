@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { clampClawPolicy, declaredOf, INIT_PRESET, normalizePolicy, presetIdForWorkspace } from './registry-presets.mjs'
+import { normalizeLeaveBehind } from './registry-leave.mjs'
 import { normalizeModel } from './registry-model.mjs'
 
 export function defaultDshHome() {
@@ -24,6 +25,7 @@ export function emptyRegistry(now = new Date().toISOString()) {
   return {
     version: 1,
     main: { agentId: 'main', createdAt: now },
+    settings: { leaveBehind: 'archive' },
     agents: {},
   }
 }
@@ -41,11 +43,15 @@ export function normalizeRegistry(raw) {
     const agent = normalizeAgent(row, key)
     if (agent) agents[agent.agentId] = agent
   }
+  const settingsIn = asObject(value.settings)
   return {
     version: 1,
     main: {
       agentId: 'main',
       createdAt: typeof main.createdAt === 'string' ? main.createdAt : new Date().toISOString(),
+    },
+    settings: {
+      leaveBehind: normalizeLeaveBehind(settingsIn.leaveBehind),
     },
     agents,
   }

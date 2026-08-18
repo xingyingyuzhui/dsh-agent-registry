@@ -1,9 +1,18 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { defaultDshHome, loadRegistry, registryFile, saveRegistry } from './registry-store.mjs'
+import { defaultDshHome, loadRegistry, loadRegistrySync, registryFile, saveRegistry } from './registry-store.mjs'
 import { defaultsFile, loadDefaultsSync } from '../dsh-agent-policy/policy-store.mjs'
 import { clearClawDefault, normalizePolicy } from './registry-presets.mjs'
 import { archiveAgent, explainAgent, identityPaths, listProjected, renameAgent, restoreAgent, syncBindings, updateAgentModel, updateAgentPolicy, updateAgentSkills } from './registry-logic.mjs'
+import {
+  applyLeaveBehind,
+  applyLeaveBehindOffline,
+  ensureOfficialWorkspaces,
+  readProfilePackageSync,
+  setLeaveBehind,
+  shouldApplyLeaveBehind,
+  writeLeavePlan,
+} from './registry-leave.mjs'
 import { listModelCatalog, normalizeModel } from './registry-model.mjs'
 import {
   bindCreatedAgent,
@@ -171,11 +180,19 @@ async function readSynced(ctx) {
   for (const agent of purged.removed) {
     await removePreset(ctx, agent.dshPreset)
   }
-  const workspaces = listWorkspaces(ctx)
+  let workspaces = listWorkspaces(ctx)
   const synced = syncBindings(purged.registry, workspaces)
   const provisioned = await provisionPresets(ctx, synced.registry, workspaces)
   const dirty = purged.changed || synced.changed || provisioned !== synced.registry
-  const registry = dirty ? await saveRegistry(file, provisioned) : provisioned
+  let registry = dirty ? await saveRegistry(file, provisioned) : provisioned
+  try {
+    const ensured = await ensureOfficialWorkspaces(ctx, registry)
+    if (ensured.created && ensured.registry !== registry) {
+      registry = await saveRegistry(file, ensured.registry)
+    }
+  } catch { /* official create is best-effort */ }
+  workspaces = listWorkspaces(ctx)
+  try { writeLeavePlan(dshHome, registry, workspaces) } catch { /* plan is best-effort */ }
   return { registry, workspaces }
 }
 
@@ -202,7 +219,13 @@ export function apply(ctx) {
         const { registry, workspaces } = await readSynced(ctx)
         const projected = listProjected(registry, workspaces, dshHome)
         if (projected.main) projected.main.files = identityPaths(dshHome, 'main', projected.main)
-        writeJson(res, 200, { ok: true, home: dshHome, clawHome: clawHome(dshHome), ...projected })
+        writeJson(res, 200, {
+          ok: true,
+          home: dshHome,
+          clawHome: clawHome(dshHome),
+          leaveBehind: registry.settings && registry.settings.leaveBehind,
+          ...projected,
+        })
       }),
     }),
     ctx.webServer.register({
@@ -476,6 +499,17 @@ export function apply(ctx) {
     }),
     ctx.webServer.register({
       kind: 'exact',
+      path: '/dsh-agent-registry/leave-behind',
+      handler: handle(async (_req, res, body) => {
+        const file = registryFile(dshHome)
+        const loaded = await loadRegistry(file)
+        const registry = await saveRegistry(file, setLeaveBehind(loaded, body && body.leaveBehind))
+        try { writeLeavePlan(dshHome, registry, listWorkspaces(ctx)) } catch { /* plan is best-effort */ }
+        writeJson(res, 200, { ok: true, leaveBehind: registry.settings.leaveBehind })
+      }),
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
       path: '/dsh-agent-registry/restore',
       handler: handle(async (_req, res, body) => {
         const agentId = body && body.agentId
@@ -503,6 +537,19 @@ export function apply(ctx) {
     for (const stop of optionalStops) {
       if (typeof stop === 'function') stop()
     }
+    try {
+      if (!shouldApplyLeaveBehind(readProfilePackageSync(dshHome))) return
+      const registry = loadRegistrySync(registryFile(dshHome))
+      const payload = {
+        home: dshHome,
+        registry,
+        workspaces: listWorkspaces(ctx),
+        workspaceRegistry: ctx.workspaceRegistry,
+        mode: registry.settings && registry.settings.leaveBehind,
+      }
+      applyLeaveBehindOffline(payload)
+      void applyLeaveBehind(payload)
+    } catch { /* uninstall cleanup is best-effort */ }
   })
 
   void guardClawDefault(ctx)

@@ -72,4 +72,6 @@ test('generated client keeps the factory contract', () => {
   assert.match(src, /modelDefault/)
   assert.match(src, /data-dar-ms-menu/)
   assert.match(src, /createPortal/)
+  assert.match(src, /leaveBehindArchive: '归档'/)
+  assert.match(src, /leave-behind/)
 })

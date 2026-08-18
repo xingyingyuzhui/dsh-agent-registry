@@ -133,6 +133,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     const current = choices.find((row) => row.agentId === selected) || choices[0]
     const agent = current && current.agent
     const isMain = false
+    const leaveBehind = (data && data.leaveBehind) || 'archive'
 
     React.useEffect(() => {
       if (choices.length === 0) return
@@ -148,6 +149,14 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
         setBusy(false)
         setConfirm(false)
       })
+    }
+
+    function saveLeaveBehind(mode) {
+      if (mode === leaveBehind) return
+      setBusy(true)
+      post('/dsh-agent-registry/leave-behind', { leaveBehind: mode }).then(() => load()).catch((err) => {
+        toast(String(err.message || t('fail')))
+      }).finally(() => setBusy(false))
     }
 
     function copyId() {
@@ -192,6 +201,19 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
           fact(t('status'), agent && agent.status === 'archived' ? t('statusArchived') : t('statusActive')),
         ),
         agent && !agent.workspacePresent ? el('p', { className: 'dar-note' }, t('missingWorkspace')) : null,
+        el('div', { className: 'dar-leave' },
+          el('div', { className: 'dar-fact-k' }, t('leaveBehind')),
+          el('p', { className: 'dar-note' }, t('leaveBehindHint')),
+          el('div', { className: 'dar-segs' }, ['archive', 'transfer', 'delete'].map((id) => el('button', {
+            key: id,
+            type: 'button',
+            className: 'dar-seg',
+            'data-on': leaveBehind === id ? 'true' : 'false',
+            disabled: busy,
+            onClick() { saveLeaveBehind(id) },
+          }, t('leaveBehind' + id.charAt(0).toUpperCase() + id.slice(1))))),
+          el('p', { className: 'dar-note' }, t('leaveBehind' + leaveBehind.charAt(0).toUpperCase() + leaveBehind.slice(1) + 'Hint')),
+        ),
       )
     }
 

@@ -36,14 +36,19 @@ dsh plugin --profile web add link:/abs/path/to/dsh-agent-registry
 - 新绑定默认套用 **research** 只读声明，`enforced: false`
 - 删除 = 归档绑定，不删项目目录、不删会话日志
 - 绑定写在 `~/.dsh/workspace-agents/registry.json`
+- 设置 → Claw Agent → 概览可选择卸掉本插件后：归档（默认）/ 转到官方工作区 / 删掉会话日志。卸载时按这个处理官方名单，避免 Claw 会话全挤进「工作区」。
 
 卸掉本插件后，DSH 原来的权限预设照旧，不会变成全开。真正按策略拒绝，要等套件里的 `dsh-agent-gate`。
 
 ## 卸载
 
+先在 **设置 → Claw Agent → 概览** 选好「卸掉本插件后」，再：
+
 ```sh
 dsh plugin --profile web remove dsh-agent-registry
 ```
+
+然后重启 `dsh web`。默认 **归档**：从官方「工作区」名单拿掉这些 Claw 行，会话日志和人设留在盘上。「转到工作区」会把它们留在官方名单里；「删掉会话记录」还会删会话日志，人设目录仍保留。
 
 ## 开发
 

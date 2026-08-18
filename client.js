@@ -413,6 +413,10 @@ function intersectMcpServers(acc, row, mcp) {
 
 function classifyTool(name, args) {
   const id = String(name || '').toLowerCase()
+  if (id === 'delegate_handoff') {
+    const action = String(asArgs(args).action || '').toLowerCase()
+    return action === 'accept' ? 'apply_patch' : 'other'
+  }
   if (OPENCLAW_FS[id]) return OPENCLAW_FS[id]
   if (id === 'str_replace_editor') {
     const cmd = commandOf(args)
@@ -433,6 +437,12 @@ function allowTool(policy, name, args) {
     const server = mcpServerOf(name)
     if (!server) return false
     return mcpServerAllowed(policy, server)
+  }
+  if (id === 'delegate_handoff') {
+    const action = String(asArgs(args).action || '').toLowerCase()
+    if (action === 'accept') return isToolEnabled(policy, 'apply_patch') || isToolEnabled(policy, 'edit')
+    if (action === 'reject' || action === 'list' || action === '') return true
+    return false
   }
   if (id.includes('subagent') || id.includes('delegate')) {
     return (policy.delegation && policy.delegation.maxDepth || 0) > 0
@@ -467,6 +477,14 @@ const COPY = {
     tabPermissions: '权限',
     tabSkills: '技能',
     overviewHint: '工作区路径与身份。这一层只登记，不改工具权限。',
+    leaveBehind: '卸掉本插件后',
+    leaveBehindHint: '官方「工作区」里怎么处理这些 Claw 会话。默认归档，避免卸掉后全挤进工作区。',
+    leaveBehindArchive: '归档',
+    leaveBehindTransfer: '转到工作区',
+    leaveBehindDelete: '删掉会话记录',
+    leaveBehindArchiveHint: '从官方工作区名单拿掉，会话日志和人设留在盘上。',
+    leaveBehindTransferHint: '官方工作区里继续挂着这些会话，卸掉后会在「工作区」里看到。',
+    leaveBehindDeleteHint: '从官方名单拿掉，并删除这些会话日志。人设文件还在。',
     personaHint: 'SOUL / IDENTITY / AGENTS / TOOLS 进提示词。USER / MEMORY / 日记开场注入（有长度上限）。HEARTBEAT 巡检默认关。',
     memWrite: '写入',
     memWriteFree: '自由写',
@@ -621,6 +639,14 @@ const COPY = {
     tabPermissions: 'Permissions',
     tabSkills: 'Skills',
     overviewHint: 'Workspace path and identity. This layer only records bindings.',
+    leaveBehind: 'When this plugin is removed',
+    leaveBehindHint: 'What official Workspaces should do with these Claw sessions. Archive is the default so they do not land in Workspaces.',
+    leaveBehindArchive: 'Archive',
+    leaveBehindTransfer: 'Move to Workspaces',
+    leaveBehindDelete: 'Delete session logs',
+    leaveBehindArchiveHint: 'Drop them from the official workspace list. Session logs and identity files stay on disk.',
+    leaveBehindTransferHint: 'Leave official workspace rows in place. After uninstall they appear under Workspaces.',
+    leaveBehindDeleteHint: 'Drop official workspace rows and delete those session logs. Identity files stay.',
     personaHint: 'SOUL / IDENTITY / AGENTS / TOOLS go into the prompt. USER / MEMORY / daily notes are injected at session start (capped). HEARTBEAT patrol stays off.',
     memWrite: 'Writes',
     memWriteFree: 'Free',
@@ -874,6 +900,7 @@ const CSS = [
   'body[' + ATTR + '] .dar-perm-item{display:flex;flex-direction:column;gap:6px;min-width:0}',
   'body[' + ATTR + '] .dar-perm-item[data-span="2"]{grid-column:1/-1}',
   'body[' + ATTR + '] .dar-perm-k{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}',
+  'body[' + ATTR + '] .dar-leave{display:flex;flex-direction:column;gap:8px;margin-top:16px}',
   'body[' + ATTR + '] .dar-segs{display:flex;flex-wrap:wrap;gap:8px}',
   'body[' + ATTR + '] .dar-seg{height:36px;padding:0 16px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:transparent;color:inherit;font:inherit;font-size:14px;cursor:pointer}',
   'body[' + ATTR + '] .dar-seg:hover{background:var(--dsw-alias-interactive-bg-hover)}',
@@ -1641,6 +1668,7 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
     const current = choices.find((row) => row.agentId === selected) || choices[0]
     const agent = current && current.agent
     const isMain = false
+    const leaveBehind = (data && data.leaveBehind) || 'archive'
 
     React.useEffect(() => {
       if (choices.length === 0) return
@@ -1656,6 +1684,14 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
         setBusy(false)
         setConfirm(false)
       })
+    }
+
+    function saveLeaveBehind(mode) {
+      if (mode === leaveBehind) return
+      setBusy(true)
+      post('/dsh-agent-registry/leave-behind', { leaveBehind: mode }).then(() => load()).catch((err) => {
+        toast(String(err.message || t('fail')))
+      }).finally(() => setBusy(false))
     }
 
     function copyId() {
@@ -1700,6 +1736,19 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
           fact(t('status'), agent && agent.status === 'archived' ? t('statusArchived') : t('statusActive')),
         ),
         agent && !agent.workspacePresent ? el('p', { className: 'dar-note' }, t('missingWorkspace')) : null,
+        el('div', { className: 'dar-leave' },
+          el('div', { className: 'dar-fact-k' }, t('leaveBehind')),
+          el('p', { className: 'dar-note' }, t('leaveBehindHint')),
+          el('div', { className: 'dar-segs' }, ['archive', 'transfer', 'delete'].map((id) => el('button', {
+            key: id,
+            type: 'button',
+            className: 'dar-seg',
+            'data-on': leaveBehind === id ? 'true' : 'false',
+            disabled: busy,
+            onClick() { saveLeaveBehind(id) },
+          }, t('leaveBehind' + id.charAt(0).toUpperCase() + id.slice(1))))),
+          el('p', { className: 'dar-note' }, t('leaveBehind' + leaveBehind.charAt(0).toUpperCase() + leaveBehind.slice(1) + 'Hint')),
+        ),
       )
     }
 

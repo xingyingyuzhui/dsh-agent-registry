@@ -76,6 +76,7 @@ export const CSS = [
   'body[' + ATTR + '] .dar-perm-item{display:flex;flex-direction:column;gap:6px;min-width:0}',
   'body[' + ATTR + '] .dar-perm-item[data-span="2"]{grid-column:1/-1}',
   'body[' + ATTR + '] .dar-perm-k{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}',
+  'body[' + ATTR + '] .dar-leave{display:flex;flex-direction:column;gap:8px;margin-top:16px}',
   'body[' + ATTR + '] .dar-segs{display:flex;flex-wrap:wrap;gap:8px}',
   'body[' + ATTR + '] .dar-seg{height:36px;padding:0 16px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:transparent;color:inherit;font:inherit;font-size:14px;cursor:pointer}',
   'body[' + ATTR + '] .dar-seg:hover{background:var(--dsw-alias-interactive-bg-hover)}',
