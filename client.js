@@ -1434,8 +1434,9 @@ function isClawBoundSession(row, agent) {
 
 function nextPresetBind({ row, agent }) {
   if (!row) return { action: 'idle', pending: null }
-  // wa-* is a registry label, not a standing composition. Blank sessions
-  // join official standard; resume of a named wa-* is aliased in resolve.
+  // wa-* is a registry label. Blank official-looking sessions that still
+  // carry a claw preset id are reset in tests; live runtime no longer
+  // calls agentPresets.select, because that remounts from the UI caller.
   if (row.blank && (isClawPresetId(row.agentPreset) || (isClawBoundSession(row, agent) && !row.agentPreset))) {
     return { action: 'select', preset: 'standard', pending: null }
   }
@@ -3777,6 +3778,24 @@ function wrapPresetList(api) {
   }
 }
 
+function sameWorkspaceSnap(left, right) {
+  if (left === right) return true
+  if (!left || !right) return false
+  if (left.recentWorkspaceId !== right.recentWorkspaceId) return false
+  const a = Array.isArray(left.items) ? left.items : []
+  const b = Array.isArray(right.items) ? right.items : []
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (!a[i] || !b[i] || String(a[i].workspaceId) !== String(b[i].workspaceId)) return false
+    const as = Array.isArray(a[i].sessionIds) ? a[i].sessionIds.join(',') : ''
+    const bs = Array.isArray(b[i].sessionIds) ? b[i].sessionIds.join(',') : ''
+    if (as !== bs) return false
+  }
+  const aa = Array.isArray(left.archivedSessionIds) ? left.archivedSessionIds.join(',') : ''
+  const ba = Array.isArray(right.archivedSessionIds) ? right.archivedSessionIds.join(',') : ''
+  return aa === ba
+}
+
 function wrapWorkspaceList(list, keysOf) {
   if (list == null || typeof list.set !== 'function' || typeof list.getSnapshot !== 'function') {
     return function () {}
@@ -3818,7 +3837,10 @@ function wrapWorkspaceList(list, keysOf) {
     return isolateWorkspaceSnapshot({ ...next, items: ingest(next.items, nextKeys) }, nextKeys)
   }
   list.set = function set(next) {
-    origSet(isolate(next))
+    const isolated = isolate(next)
+    const cur = list.getSnapshot()
+    if (cur && isolated && sameWorkspaceSnap(cur, isolated)) return
+    origSet(isolated)
   }
   if (origUpdate) {
     list.update = function update(mutator) {
@@ -3950,8 +3972,6 @@ function apply(ctx) {
   const stopSettings = registerSettings(ctx, React, t, Page)
 
   let projected = null
-  let pendingBind = null
-  let bindTimer = null
 
   function connectionApi() {
     try {
@@ -3962,46 +3982,10 @@ function apply(ctx) {
     }
   }
 
-  function selectPreset(sessionId, agentPreset) {
-    const api = connectionApi()
-    if (api == null || api.agentPresets == null || typeof api.agentPresets.select !== 'function') return Promise.resolve(false)
-    return Promise.resolve(api.agentPresets.select({ sessionId, agentPreset })).then((response) => {
-      const ok = !response || response.result == null || response.result.ok !== false
-      if (ok && ctx.sessions && typeof ctx.sessions.noteAgentPreset === 'function') {
-        ctx.sessions.noteAgentPreset(sessionId, agentPreset)
-      }
-      return ok
-    }).catch(() => false)
-  }
-
   function clawLock() {
     const current = currentSessionOf(ctx.sessions)
     const agent = agentForSession(projected, current.id, current.row)
     return { current, agent, preset: boundPresetOf(agent) }
-  }
-
-  function bindCurrentIfClaw() {
-    const lock = clawLock()
-    const decision = nextPresetBind({
-      row: lock.current.row,
-      agent: lock.agent,
-      pending: pendingBind,
-      liveIds: clawPresetIds(projected),
-    })
-    pendingBind = decision.pending
-    if (decision.action !== 'select' || !lock.current.id) return
-    void selectPreset(lock.current.id, decision.preset).then((ok) => {
-      if (ok) pendingBind = null
-    })
-  }
-
-  function scheduleBind() {
-    bindCurrentIfClaw()
-    if (bindTimer != null) clearTimeout(bindTimer)
-    bindTimer = setTimeout(function () {
-      bindTimer = null
-      bindCurrentIfClaw()
-    }, 200)
   }
 
   const sidebarApi = {
@@ -4012,22 +3996,18 @@ function apply(ctx) {
       if (!workspaceId) return
       const agents = (projected && projected.agents) || []
       const agent = agents.find((row) => row && String(row.workspaceId) === String(workspaceId))
-      pendingBind = { workspaceId: String(workspaceId), preset: 'standard' }
       const api = connectionApi()
       if (api && api.sessions && typeof api.sessions.create === 'function' && agent) {
         Promise.resolve(api.sessions.create({ workspaceId, agentPreset: 'standard' })).then((res) => {
           const value = res && res.result && res.result.ok === true ? res.result.value : null
           const id = value && value.sessionId
           if (id && ctx.sessions && typeof ctx.sessions.open === 'function') ctx.sessions.open(id)
-          scheduleBind()
         }).catch(() => {
           if (ctx.workspaces && typeof ctx.workspaces.startSession === 'function') ctx.workspaces.startSession(workspaceId)
-          scheduleBind()
         })
         return
       }
       if (ctx.workspaces && typeof ctx.workspaces.startSession === 'function') ctx.workspaces.startSession(workspaceId)
-      scheduleBind()
     },
     archiveAgent(agentId) {
       return post('/dsh-agent-registry/archive', { agentId }).then(() => loadProjected())
@@ -4055,7 +4035,6 @@ function apply(ctx) {
       if (sessions == null || typeof sessions.fork !== 'function') return
       Promise.resolve(sessions.fork({ sessionId, increaseTitle: true })).then((childId) => {
         if (childId && typeof sessions.open === 'function') sessions.open(childId)
-        scheduleBind()
       })
     },
     archiveSession(sessionId) {
@@ -4105,7 +4084,6 @@ function apply(ctx) {
     openSession(sessionId) {
       if (!sessionId || ctx.sessions == null || typeof ctx.sessions.open !== 'function') return
       ctx.sessions.open(sessionId)
-      scheduleBind()
     },
     onZone() { paintOverlays() },
     createAgent(name) {
@@ -4184,7 +4162,6 @@ function apply(ctx) {
       if (sessions != null && sessions.list != null && typeof sessions.list.subscribe === 'function') {
         unsubSessions = sessions.list.subscribe(function () {
           paintOverlays()
-          scheduleBind()
           if (reloadTimer != null) clearTimeout(reloadTimer)
           reloadTimer = setTimeout(function () {
             reloadTimer = null
@@ -4201,7 +4178,6 @@ function apply(ctx) {
       if (typeof stopSessionSearch === 'function') stopSessionSearch()
       if (timer != null) clearTimeout(timer)
       if (reloadTimer != null) clearTimeout(reloadTimer)
-      if (bindTimer != null) clearTimeout(bindTimer)
       if (observer) observer.disconnect()
       if (doc) doc.removeEventListener('click', onClick, true)
       if (sidebar) sidebar.remove()

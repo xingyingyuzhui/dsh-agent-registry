@@ -105,6 +105,24 @@ export function wrapPresetList(api) {
   }
 }
 
+function sameWorkspaceSnap(left, right) {
+  if (left === right) return true
+  if (!left || !right) return false
+  if (left.recentWorkspaceId !== right.recentWorkspaceId) return false
+  const a = Array.isArray(left.items) ? left.items : []
+  const b = Array.isArray(right.items) ? right.items : []
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (!a[i] || !b[i] || String(a[i].workspaceId) !== String(b[i].workspaceId)) return false
+    const as = Array.isArray(a[i].sessionIds) ? a[i].sessionIds.join(',') : ''
+    const bs = Array.isArray(b[i].sessionIds) ? b[i].sessionIds.join(',') : ''
+    if (as !== bs) return false
+  }
+  const aa = Array.isArray(left.archivedSessionIds) ? left.archivedSessionIds.join(',') : ''
+  const ba = Array.isArray(right.archivedSessionIds) ? right.archivedSessionIds.join(',') : ''
+  return aa === ba
+}
+
 export function wrapWorkspaceList(list, keysOf) {
   if (list == null || typeof list.set !== 'function' || typeof list.getSnapshot !== 'function') {
     return function () {}
@@ -146,7 +164,10 @@ export function wrapWorkspaceList(list, keysOf) {
     return isolateWorkspaceSnapshot({ ...next, items: ingest(next.items, nextKeys) }, nextKeys)
   }
   list.set = function set(next) {
-    origSet(isolate(next))
+    const isolated = isolate(next)
+    const cur = list.getSnapshot()
+    if (cur && isolated && sameWorkspaceSnap(cur, isolated)) return
+    origSet(isolated)
   }
   if (origUpdate) {
     list.update = function update(mutator) {
