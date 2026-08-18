@@ -417,7 +417,10 @@ export function apply(ctx) {
     }),
   ]
 
+  // Warm official standard after apply returns so resume can join it.
+  const timer = setTimeout(() => { void warmOfficialStandard(ctx) }, 0)
   ctx.effect(() => () => {
+    clearTimeout(timer)
     for (const dispose of routes) {
       if (typeof dispose === 'function') dispose()
     }
@@ -427,8 +430,4 @@ export function apply(ctx) {
   })
 
   void guardClawDefault(ctx)
-  // Resume must JOIN the official standing tree. Warm it here, during
-  // plugin load, so a later model change does not mint `standard` from
-  // the resume caller shadow.
-  return warmOfficialStandard(ctx)
 }

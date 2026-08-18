@@ -128,7 +128,8 @@ test('host aliases claw resolve to standard and warms official standing mount', 
     webServer: { register() { return () => {} } },
     effect(factory) { ctx._stop = factory() },
   }
-  await apply(ctx)
+  apply(ctx)
+  await new Promise((resolve) => setTimeout(resolve, 10))
   assert.equal(ctx.agentPresets.mount, mount)
   assert.equal(ctx.agentPresets.recompose, recompose)
   assert.deepEqual(warmed, ['standard'])
