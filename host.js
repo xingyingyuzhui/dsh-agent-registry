@@ -147,6 +147,16 @@ function pinClawPresetAlias(ctx) {
   }
 }
 
+function warmOfficialStandard(ctx) {
+  const presets = ctx.agentPresets
+  if (!presets || typeof presets.standingKeyFor !== 'function') return Promise.resolve()
+  return Promise.resolve(presets.standingKeyFor('standard')).catch((error) => {
+    if (ctx.logger && typeof ctx.logger.warn === 'function') {
+      ctx.logger.warn('dsh-agent-registry: could not warm official standard: ' + (error && error.message ? error.message : error))
+    }
+  })
+}
+
 async function provisionPresets(ctx, registry) {
   await guardClawDefault(ctx)
   return registry
@@ -417,4 +427,8 @@ export function apply(ctx) {
   })
 
   void guardClawDefault(ctx)
+  // Resume must JOIN the official standing tree. Warm it here, during
+  // plugin load, so a later model change does not mint `standard` from
+  // the resume caller shadow.
+  return warmOfficialStandard(ctx)
 }

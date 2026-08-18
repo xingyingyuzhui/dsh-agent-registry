@@ -102,8 +102,9 @@ test('list handler does not bind ordinary workspaces', async () => {
   assert.match(payload.clawHome, /DSclaw/)
 })
 
-test('host aliases claw resolve to standard and does not wrap mount', async () => {
+test('host aliases claw resolve to standard and warms official standing mount', async () => {
   const seen = []
+  const warmed = []
   const mount = async () => ({})
   const recompose = async () => ({})
   const ctx = {
@@ -116,6 +117,10 @@ test('host aliases claw resolve to standard and does not wrap mount', async () =
         seen.push(id)
         return { id }
       },
+      async standingKeyFor(id) {
+        warmed.push(id)
+        return { agentPreset: id }
+      },
       mount,
       recompose,
       async copy() {},
@@ -123,9 +128,10 @@ test('host aliases claw resolve to standard and does not wrap mount', async () =
     webServer: { register() { return () => {} } },
     effect(factory) { ctx._stop = factory() },
   }
-  apply(ctx)
+  await apply(ctx)
   assert.equal(ctx.agentPresets.mount, mount)
   assert.equal(ctx.agentPresets.recompose, recompose)
+  assert.deepEqual(warmed, ['standard'])
   assert.deepEqual(await ctx.agentPresets.resolve('wa-test2'), { id: 'standard' })
   assert.deepEqual(await ctx.agentPresets.resolve('standard'), { id: 'standard' })
   assert.deepEqual(seen, ['standard', 'standard'])
