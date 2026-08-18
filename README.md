@@ -2,6 +2,8 @@
 
 治理套件的 **Phase 0**：把 DSH 工作区绑到一个稳定的 Claw Agent 上。只登记、解释、归档，**不拦截工具**。
 
+合集与整体说明：https://github.com/xingyingyuzhui/dsh-claw-suite
+
 打开 **设置 → Claw Agent**（在 **Agent 预设** 上方）：选 Agent，再用概览 / 人设 / 模型 / 权限 / 技能看各面。Main 不在这一页。
 
 Claw Agent 按 **名字 → 名下会话** 组织。工作区默认建在 DeepSeek Harness 根目录（`$DSH_HOME`，一般是 `~/.dsh`）下的 `DSclaw/<agent>/`。
