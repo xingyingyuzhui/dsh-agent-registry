@@ -958,7 +958,7 @@ const SHIPPED_PRESET_IDS = ['standard', 'code', 'minimal', 'cordis']
 const TEMPLATE_ID = 'wa-template'
 const TEMPLATE_NAME = 'claw区agent模板'
 const TEMPLATE_LEGACY_NAMES = ['工作区 Agent 模板', '工作区agent模板']
-const TEMPLATE_SOURCE_CANDIDATES = ['minimal', 'standard']
+const TEMPLATE_SOURCE_CANDIDATES = ['standard', 'code']
 
 function presetIdForWorkspace(workspaceId) {
   return 'wa-' + String(workspaceId)
@@ -1036,6 +1036,52 @@ async function clearClawDefault(settings, defaultId) {
   }
   await settings.mutate('agent-presets', [{ op: 'unset', path: ['default'] }])
   return { cleared: true }
+}
+
+function isIsolatedMinimalClone(text) {
+  const src = String(text || '')
+  return src.includes('dsh-tool-bash-persistent') || src.includes('dsh-tool-str-replace-editor')
+}
+
+async function mountWithClawFallback(origMount, id, agentCtx, fallbackId) {
+  const fallback = fallbackId || 'standard'
+  try {
+    return await origMount(agentCtx, id)
+  } catch (error) {
+    if (id === fallback || !isClawPresetId(id)) throw error
+    return origMount(agentCtx, fallback)
+  }
+}
+
+async function repairIsolatedMinimalClones(presets, io) {
+  if (presets == null || typeof presets.list !== 'function' || typeof presets.copy !== 'function' || io == null) {
+    return { repaired: [] }
+  }
+  const list = await presets.list()
+  const ids = new Set(list.map((row) => row && row.id).filter(Boolean))
+  const source = TEMPLATE_SOURCE_CANDIDATES.find((id) => ids.has(id))
+  if (!source) return { repaired: [] }
+  const repaired = []
+  const rows = list.filter((row) => row && isClawPresetId(row.id) && row.path)
+  rows.sort((a, b) => (a.id === TEMPLATE_ID ? -1 : b.id === TEMPLATE_ID ? 1 : 0))
+  for (const row of rows) {
+    let text = ''
+    try {
+      text = await io.readFile(row.path, 'utf8')
+    } catch {
+      continue
+    }
+    if (!isIsolatedMinimalClone(text)) continue
+    const from = row.id === TEMPLATE_ID ? source : (ids.has(TEMPLATE_ID) ? TEMPLATE_ID : source)
+    if (typeof presets.remove === 'function') {
+      await presets.remove(row.id)
+      ids.delete(row.id)
+    }
+    await presets.copy(from, row.id, row.name || row.id)
+    ids.add(row.id)
+    repaired.push(row.id)
+  }
+  return { repaired }
 }
 
 async function ensureGeneratedPreset(presets, spec) {

@@ -9,6 +9,9 @@ import {
   applyPreset,
   declaredOf,
   ensureGeneratedPreset,
+  isIsolatedMinimalClone,
+  mountWithClawFallback,
+  repairIsolatedMinimalClones,
   isToolEnabled,
   toggleTool,
   ensureTemplateNamed,
@@ -120,9 +123,58 @@ test('ensureGeneratedPreset copies template then workspace preset', async () => 
   await ensureGeneratedPreset(presets, { id: 'wa-ws1', name: 'One' })
   await ensureGeneratedPreset(presets, { id: 'wa-ws1', name: 'One' })
   assert.deepEqual(copies, [
-    { from: 'minimal', id: 'wa-template', name: TEMPLATE_NAME },
+    { from: 'standard', id: 'wa-template', name: TEMPLATE_NAME },
     { from: 'wa-template', id: 'wa-ws1', name: 'One' },
   ])
+})
+
+test('isolated minimal clones are detected and recopied from standard', async () => {
+  assert.equal(isIsolatedMinimalClone("name: '@deepseek-ai/dsh-tool-bash-persistent'"), true)
+  assert.equal(isIsolatedMinimalClone('You are a coding agent'), false)
+  const files = {
+    '/tmp/wa-template/agent.cordis.yml': "name: '@deepseek-ai/dsh-tool-str-replace-editor'\n",
+    '/tmp/wa-test1/agent.cordis.yml': "name: '@deepseek-ai/dsh-tool-bash-persistent'\n",
+  }
+  const copies = []
+  const removed = []
+  const roster = [
+    { id: 'standard' },
+    { id: 'wa-test1', path: '/tmp/wa-test1/agent.cordis.yml', name: 'test1' },
+    { id: 'wa-template', path: '/tmp/wa-template/agent.cordis.yml', name: TEMPLATE_NAME },
+  ]
+  const presets = {
+    async list() { return roster.filter((row) => removed.indexOf(row.id) < 0) },
+    async remove(id) { removed.push(id) },
+    async copy(from, id, name) {
+      copies.push({ from, id, name })
+      if (removed.indexOf(id) >= 0) removed.splice(removed.indexOf(id), 1)
+    },
+  }
+  const result = await repairIsolatedMinimalClones(presets, {
+    async readFile(file) { return files[file] },
+    async writeFile() {},
+  })
+  assert.deepEqual(result.repaired, ['wa-template', 'wa-test1'])
+  assert.deepEqual(copies, [
+    { from: 'standard', id: 'wa-template', name: TEMPLATE_NAME },
+    { from: 'wa-template', id: 'wa-test1', name: 'test1' },
+  ])
+})
+
+test('mountWithClawFallback remounts standard when a claw preset fails', async () => {
+  const calls = []
+  const orig = async (_ctx, id) => {
+    calls.push(id)
+    if (id === 'wa-test1-2') throw new Error('cannot get property "agents" without inject')
+    return { presetId: id }
+  }
+  const mounted = await mountWithClawFallback(orig, 'wa-test1-2', {}, 'standard')
+  assert.deepEqual(calls, ['wa-test1-2', 'standard'])
+  assert.equal(mounted.presetId, 'standard')
+  const boom = async () => {
+    throw new Error('cannot get property "agents" without inject')
+  }
+  await assert.rejects(() => mountWithClawFallback(boom, 'standard', {}, 'standard'), /agents/)
 })
 
 test('ensureGeneratedPreset refuses shipped ids', async () => {

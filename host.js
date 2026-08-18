@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defaultDshHome, loadRegistry, loadRegistrySync, registryFile, saveRegistry } from './registry-store.mjs'
 import { defaultsFile, loadDefaultsSync } from '../dsh-agent-policy/policy-store.mjs'
-import { clearClawDefault, ensureGeneratedPreset, ensureOpenPersona, ensureTemplateNamed, fallbackMissingPreset, normalizePolicy } from './registry-presets.mjs'
+import { clearClawDefault, ensureGeneratedPreset, ensureOpenPersona, ensureTemplateNamed, fallbackMissingPreset, mountWithClawFallback, normalizePolicy, repairIsolatedMinimalClones } from './registry-presets.mjs'
 import { archiveAgent, explainAgent, identityPaths, listProjected, renameAgent, restoreAgent, syncBindings, updateAgentModel, updateAgentPolicy, updateAgentSkills } from './registry-logic.mjs'
 import { listModelCatalog, modelOfAgent, normalizeModel, resolveBlankSelection } from './registry-model.mjs'
 import {
@@ -182,12 +182,12 @@ function pinMissingPresets(ctx) {
   }
   if (origMount) {
     presets.mount = async function mount(agentCtx, id) {
-      return origMount(agentCtx, await remap(id))
+      return mountWithClawFallback(origMount, await remap(id), agentCtx, presets.defaultId || 'standard')
     }
   }
   if (origRecompose) {
     presets.recompose = async function recompose(agentCtx, id) {
-      return origRecompose(agentCtx, await remap(id))
+      return mountWithClawFallback(origRecompose, await remap(id), agentCtx, presets.defaultId || 'standard')
     }
   }
   if (origStanding) {
@@ -227,6 +227,13 @@ async function provisionPresets(ctx, registry, workspaces) {
   const presets = ctx.agentPresets
   if (presets == null || typeof presets.copy !== 'function') return registry
   const next = registry
+  try {
+    await repairIsolatedMinimalClones(presets, { readFile, writeFile })
+  } catch (error) {
+    if (ctx.logger && typeof ctx.logger.warn === 'function') {
+      ctx.logger.warn('dsh-agent-registry: preset repair failed: ' + (error && error.message ? error.message : error))
+    }
+  }
   for (const agent of Object.values(next.agents)) {
     if (agent == null || agent.status === 'archived') continue
     const id = agent.dshPreset
