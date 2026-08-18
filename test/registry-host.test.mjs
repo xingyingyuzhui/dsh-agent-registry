@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { apply, inject, name, _internal } from '../host.js'
 
+_internal.migrateOnApply = false
+
 function postReq() {
   const req = new EventEmitter()
   req.method = 'POST'
@@ -19,7 +21,9 @@ test('host named exports', () => {
   assert.deepEqual(inject, ['webServer', 'workspaceRegistry', 'agentPresets', 'settings'])
 })
 
-test('apply registers POST routes and disposes them', () => {
+test('apply registers POST routes and disposes them', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dar-home-'))
+  _internal.setDshHome(dir)
   const disposed = []
   const routes = []
   const ctx = {
@@ -37,7 +41,7 @@ test('apply registers POST routes and disposes them', () => {
     },
   }
   apply(ctx)
-  assert.equal(routes.length, 10)
+  assert.equal(routes.length, 11)
   assert.ok(routes.every((row) => row.kind === 'exact'))
   assert.deepEqual(routes.map((row) => row.path), [
     '/dsh-agent-registry/list',
@@ -45,6 +49,7 @@ test('apply registers POST routes and disposes them', () => {
     '/dsh-agent-registry/archive',
     '/dsh-agent-registry/rename',
     '/dsh-agent-registry/create',
+    '/dsh-agent-registry/diag',
     '/dsh-agent-registry/policy',
     '/dsh-agent-registry/skills',
     '/dsh-agent-registry/models',
@@ -52,7 +57,7 @@ test('apply registers POST routes and disposes them', () => {
     '/dsh-agent-registry/restore',
   ])
   ctx._stop()
-  assert.equal(disposed.length, 10)
+  assert.equal(disposed.length, 11)
 })
 
 test('list handler does not bind ordinary workspaces', async () => {
@@ -102,7 +107,9 @@ test('list handler does not bind ordinary workspaces', async () => {
   assert.match(payload.clawHome, /DSclaw/)
 })
 
-test('host does not wrap agentPresets composition APIs', () => {
+test('host does not wrap agentPresets composition APIs', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dar-home-'))
+  _internal.setDshHome(dir)
   const resolve = async (id) => ({ id })
   const mount = async () => ({})
   const recompose = async () => ({})
@@ -128,4 +135,52 @@ test('host does not wrap agentPresets composition APIs', () => {
   assert.equal(ctx.agentPresets.recompose, recompose)
   assert.equal(ctx.agentPresets.standingKeyFor, standingKeyFor)
   ctx._stop()
+})
+
+test('create skips a non-empty orphan directory instead of overwriting it', async () => {
+  const { mkdir, writeFile, readFile } = await import('node:fs/promises')
+  const dir = await mkdtemp(join(tmpdir(), 'dar-home-'))
+  _internal.setDshHome(dir)
+  const orphan = join(dir, 'DSclaw', 'demo')
+  await mkdir(orphan, { recursive: true })
+  await writeFile(join(orphan, 'SOUL.md'), 'keep custom soul\n')
+  let body = ''
+  let status = 0
+  const res = {
+    writeHead(code) { status = code },
+    end(text) { body = text },
+  }
+  const routes = []
+  const ctx = {
+    workspaceRegistry: {
+      list() { return [] },
+      async create(path, title) {
+        return { id: 'ws-new', path, title }
+      },
+    },
+    agentPresets: { authorable: true, async list() { return [] }, async copy() {} },
+    settings: { async mutate() {} },
+    webServer: {
+      register(entry) {
+        routes.push(entry)
+        return () => {}
+      },
+    },
+    effect() {},
+  }
+  apply(ctx)
+  const handler = routes.find((row) => row.path.endsWith('/create')).handler
+  const req = new EventEmitter()
+  req.method = 'POST'
+  req.headers = { 'x-dsh-agent-registry': '1' }
+  queueMicrotask(() => {
+    req.emit('data', Buffer.from(JSON.stringify({ name: 'Demo' })))
+    req.emit('end')
+  })
+  await handler(req, res)
+  assert.equal(status, 200)
+  const payload = JSON.parse(body)
+  assert.equal(payload.ok, true)
+  assert.equal(payload.agent.slug, 'demo-2')
+  assert.equal(await readFile(join(orphan, 'SOUL.md'), 'utf8'), 'keep custom soul\n')
 })

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -25,7 +25,7 @@ import {
 } from '../registry-presets.mjs'
 import { archiveAgent, explainAgent, listProjected, renameAgent, restoreAgent, sameRoot, syncBindings } from '../registry-logic.mjs'
 import { CLAW_SESSION_ATTR, PRESET_HIDE_ATTR, WORKSPACE_HIDE_ATTR, hideClawPresetSurfaces, hideClawSessionSeat, inProtectedChrome, isAccessSeatButton, isAccessMenuItem, isPresetSeatButton, isWorkspaceSeatButton } from '../registry-preset-hide.mjs'
-import { bindCreatedAgent, isClawHomePath, isStockAgentsSeed, purgeLegacyAgents, refreshSeedFiles, rewriteIdentityHeading, seedFiles, seedNeedsRefresh, slugFromName } from '../registry-claw.mjs'
+import { bindCreatedAgent, isClawHomePath, isStockAgentsSeed, purgeLegacyAgents, refreshSeedFiles, reserveClawWorkspace, rewriteIdentityHeading, seedFiles, seedNeedsRefresh, slugFromName } from '../registry-claw.mjs'
 import {
   agentForSession,
   nextPresetBind,
@@ -340,6 +340,13 @@ test('refreshSeedFiles upgrades stock identity to the OpenClaw-style template', 
   assert.doesNotMatch(customSoul['SOUL.md'], /不是通用聊天机器人/)
 })
 
+test('reserveClawWorkspace refuses a non-empty existing root', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dar-claw-'))
+  const root = await reserveClawWorkspace(dir, 'alpha')
+  await writeFile(join(root, 'SOUL.md'), 'mine\n')
+  await assert.rejects(() => Promise.resolve().then(() => reserveClawWorkspace(dir, 'alpha')), /already exists/)
+})
+
 test('claw slugs and legacy purge', () => {
   assert.equal(slugFromName('Research Bot', []), 'research-bot')
   assert.equal(slugFromName('小黄', []), 'claw')
@@ -433,6 +440,27 @@ test('missing claw presets fall back to standard; live and shipped ids stay', ()
   assert.equal(aliasClawPresetId('wa-template', 'wa-template'), 'standard')
 })
 
+test('nextPresetBind never asks the client to select a preset', () => {
+  assert.deepEqual(nextPresetBind(), { action: 'idle', pending: null })
+  assert.deepEqual(nextPresetBind({
+    row: { blank: true, cwd: '/Users/qin/.dsh/DSclaw/test1', agentPreset: 'wa-test1' },
+    agent: { workspaceId: 'w1' },
+  }), { action: 'idle', pending: null })
+})
+
+test('concurrent registry saves do not throw ENOENT', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dar-reg-'))
+  const file = join(dir, 'workspace-agents', 'registry.json')
+  const first = emptyRegistry('t0')
+  first.agents.wa_a = ensureBinding(first, { id: 'a', path: '/tmp/a', title: 'A' }, 't1').agent
+  await Promise.all([
+    saveRegistry(file, first),
+    saveRegistry(file, { ...first, agents: { ...first.agents, wa_b: ensureBinding(first, { id: 'b', path: '/tmp/b', title: 'B' }, 't2').agent } }),
+  ])
+  const loaded = await loadRegistry(file)
+  assert.ok(loaded.agents)
+})
+
 test('workspace sessions wearing a missing claw preset are reset to standard', () => {
   const live = new Set(['wa-template', 'wa-test1'])
   const official = nextPresetBind({
@@ -445,7 +473,7 @@ test('workspace sessions wearing a missing claw preset are reset to standard', (
     pending: { workspaceId: 'claw-ws', preset: 'wa-test1' },
     liveIds: live,
   })
-  assert.deepEqual(official, { action: 'select', preset: 'standard', pending: null })
+  assert.deepEqual(official, { action: 'idle', pending: null })
   const already = nextPresetBind({
     row: { blank: true, cwd: '/Users/qin/DSH', agentPreset: 'standard' },
     agent: null,
@@ -459,7 +487,7 @@ test('workspace sessions wearing a missing claw preset are reset to standard', (
     pending: null,
     liveIds: live,
   })
-  assert.deepEqual(claw, { action: 'select', preset: 'standard', pending: null })
+  assert.deepEqual(claw, { action: 'idle', pending: null })
   const clawIdle = nextPresetBind({
     row: { blank: true, cwd: '/Users/qin/.dsh/DSclaw/test1', agentPreset: 'standard' },
     agent: { workspaceId: 'w1', dshPreset: 'wa-test1' },

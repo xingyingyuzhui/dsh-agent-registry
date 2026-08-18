@@ -21,6 +21,7 @@ const parts = [
   'registry-presets.mjs',
   'registry-model.mjs',
   'registry-view.mjs',
+  'registry-observe.mjs',
   'registry-settings.mjs',
   'registry-sidebar.mjs',
   'registry-preset-hide.mjs',

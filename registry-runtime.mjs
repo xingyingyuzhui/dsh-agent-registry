@@ -11,6 +11,7 @@ import {
   hideClawSessionSeat,
 } from './registry-preset-hide.mjs'
 import { wrapPresetList, wrapSessionSearch, wrapWorkspaceList } from './registry-isolate.mjs'
+import { formatObserveFail, newTraceId } from './registry-observe.mjs'
 
 export const ICON = '<svg data-dar-icon="1" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="6" cy="5.5" r="2.2" stroke="currentColor" stroke-width="1.3"/><circle cx="10.5" cy="6.2" r="1.8" stroke="currentColor" stroke-width="1.3"/><path d="M2.6 13.2c.4-2.1 2-3.4 3.4-3.4s3 1.3 3.4 3.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M9.2 12.6c.3-1.4 1.3-2.3 2.3-2.3 1 0 1.8.7 2.2 1.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>'
 
@@ -48,13 +49,20 @@ export function apply(ctx) {
   }
 
   function post(path, payload) {
+    const traceId = newTraceId()
     return fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Registry': '1' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-DSH-Agent-Registry': '1',
+        'X-DSH-Trace': traceId,
+      },
       body: JSON.stringify(payload || {}),
     }).then((res) => res.json().then((data) => {
       if (!res.ok && (!data || data.ok !== true)) {
-        const error = new Error((data && data.error) || ('http ' + res.status))
+        const error = new Error(formatObserveFail(data, 'http ' + res.status))
+        error.code = data && data.code
+        error.traceId = (data && data.traceId) || traceId
         throw error
       }
       return data
@@ -125,15 +133,16 @@ export function apply(ctx) {
         Promise.resolve(api.sessions.create({ workspaceId, agentPreset: 'standard' })).then((res) => {
           const value = res && res.result && res.result.ok === true ? res.result.value : null
           const id = value && value.sessionId
-          if (id && ctx.sessions && typeof ctx.sessions.open === 'function') ctx.sessions.open(id)
+          if (!id) throw new Error('session create failed')
+          if (ctx.sessions && typeof ctx.sessions.open === 'function') ctx.sessions.open(id)
           const model = agent && agent.model
-          if (id && model && model.provider && model.model && api.sessions && typeof api.sessions.selectModel === 'function') {
-            return api.sessions.selectModel({
+          if (model && model.provider && model.model && api.sessions && typeof api.sessions.selectModel === 'function') {
+            return Promise.resolve(api.sessions.selectModel({
               sessionId: id,
               provider: model.provider,
               model: model.model,
               reasoningEffort: model.reasoningEffort,
-            })
+            })).catch(() => {})
           }
         }).catch(() => {
           if (ctx.workspaces && typeof ctx.workspaces.startSession === 'function') ctx.workspaces.startSession(workspaceId)
@@ -149,7 +158,7 @@ export function apply(ctx) {
       return post('/dsh-agent-registry/rename', { agentId, name }).then((data) => {
         const workspaceId = data && data.agent && data.agent.workspaceId
         if (workspaceId && ctx.workspaces && typeof ctx.workspaces.rename === 'function') {
-          return Promise.resolve(ctx.workspaces.rename(workspaceId, name)).catch(() => {}).then(() => loadProjected())
+          return Promise.resolve(ctx.workspaces.rename(workspaceId, name)).then(() => loadProjected())
         }
         return loadProjected()
       })

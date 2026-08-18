@@ -8,11 +8,16 @@ import { listModelCatalog, normalizeModel } from './registry-model.mjs'
 import {
   bindCreatedAgent,
   clawHome,
-  clawWorkspaceDir,
+  isClawHomePath,
+  listClawSlugs,
   purgeLegacyAgents,
+  reserveClawWorkspace,
+  sanitizeAgentTitle,
   seedFiles,
   slugFromName,
 } from './registry-claw.mjs'
+import { migrateClawLegacy } from './registry-migrate.mjs'
+import { CODES, currentTraceId, operation, runWithTrace, setObserveHome } from '../dsh-observability/observe.mjs'
 
 export const name = 'dsh-agent-registry'
 export const inject = ['webServer', 'workspaceRegistry', 'agentPresets', 'settings']
@@ -22,14 +27,54 @@ const LOOPBACK_ORIGIN = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/
 let dshHome = defaultDshHome()
 
 const _internal = {
-  setDshHome(dir) { dshHome = dir },
+  setDshHome(dir) {
+    dshHome = dir
+    setObserveHome(dir)
+  },
   getDshHome() { return dshHome },
+  migrateOnApply: true,
 }
 export { _internal }
 
+function runLegacyMigrate(ctx) {
+  const op = operation({ plugin: 'dsh-agent-registry', feature: 'legacy', operation: 'migrate_claw_presets' })
+  try {
+    const result = migrateClawLegacy(dshHome)
+    const changed = (result.quarantined && result.quarantined.length) || (result.sessions && result.sessions.length)
+    if (!changed && result.skipped) return
+    op.start()
+    if (result.incomplete) {
+      op.degraded(CODES.REGISTRY_LEGACY_MIGRATE_FAILED, {
+        quarantined: result.quarantined.length,
+        sessions: result.sessions.length,
+        errors: (result.errors || []).length,
+      })
+    } else {
+      op.success({
+        code: CODES.REGISTRY_LEGACY_MIGRATED,
+        quarantined: result.quarantined.length,
+        sessions: result.sessions.length,
+      })
+    }
+    if (changed && ctx.logger && typeof ctx.logger.info === 'function') {
+      ctx.logger.info('dsh-agent-registry: migrated leftover wa-* (' + result.quarantined.length + ' presets, ' + result.sessions.length + ' sessions)')
+    }
+  } catch (error) {
+    op.start()
+    op.fail(CODES.REGISTRY_LEGACY_MIGRATE_FAILED, error)
+    if (ctx.logger && typeof ctx.logger.warn === 'function') {
+      ctx.logger.warn('dsh-agent-registry: leftover migrate failed: ' + (error && error.message ? error.message : error))
+    }
+  }
+}
+
 const writeJson = (res, status, body) => {
+  const traceId = currentTraceId()
+  const payload = body && typeof body === 'object' && traceId && body.traceId == null
+    ? { ...body, traceId }
+    : body
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-  res.end(JSON.stringify(body))
+  res.end(JSON.stringify(payload))
 }
 
 const readJsonBody = (req, cap = BODY_CAP) => new Promise((resolveBody, reject) => {
@@ -135,7 +180,9 @@ async function readSynced(ctx) {
 }
 
 export function apply(ctx) {
-  const handle = (fn) => async (req, res) => {
+  if (_internal.migrateOnApply) runLegacyMigrate(ctx)
+
+  const handle = (fn) => async (req, res) => runWithTrace(req, async () => {
     if (!guard(req, res)) return
     try {
       const body = await readJsonBody(req)
@@ -143,7 +190,7 @@ export function apply(ctx) {
     } catch (error) {
       writeJson(res, 400, { ok: false, error: error && error.message ? error.message : 'bad request' })
     }
-  }
+  })
 
   const optionalStops = []
 
@@ -196,19 +243,30 @@ export function apply(ctx) {
       path: '/dsh-agent-registry/rename',
       handler: handle(async (_req, res, body) => {
         const agentId = body && body.agentId
-        const title = body && typeof body.name === 'string' ? body.name.trim() : ''
+        const title = sanitizeAgentTitle(body && body.name)
+        const op = operation({ plugin: 'dsh-agent-registry', feature: 'agent', operation: 'rename_agent', agentId })
+        op.start()
         if (typeof agentId !== 'string' || !agentId.startsWith('wa_') || !title) {
-          writeJson(res, 400, { ok: false, error: 'invalid rename' })
+          op.reject(CODES.REGISTRY_RENAME_INVALID)
+          writeJson(res, 400, { ok: false, error: 'invalid rename', code: CODES.REGISTRY_RENAME_INVALID })
           return
         }
         const file = registryFile(dshHome)
         const loaded = await loadRegistry(file)
         const result = renameAgent(loaded, agentId, title)
         if (!result.agent) {
-          writeJson(res, 404, { ok: false, error: 'agent not found' })
+          op.reject(CODES.REGISTRY_AGENT_NOT_FOUND)
+          writeJson(res, 404, { ok: false, error: 'agent not found', code: CODES.REGISTRY_AGENT_NOT_FOUND })
           return
         }
-        await saveRegistry(file, result.registry)
+        try {
+          await saveRegistry(file, result.registry)
+        } catch (error) {
+          op.fail(CODES.REGISTRY_RENAME_FAILED, error, { state: 'clean' })
+          writeJson(res, 500, { ok: false, error: 'rename save failed', code: CODES.REGISTRY_RENAME_FAILED })
+          return
+        }
+        op.success({ agentId })
         writeJson(res, 200, { ok: true, agent: result.agent })
       }),
     }),
@@ -216,24 +274,42 @@ export function apply(ctx) {
       kind: 'exact',
       path: '/dsh-agent-registry/create',
       handler: handle(async (_req, res, body) => {
-        const title = body && typeof body.name === 'string' ? body.name.trim() : ''
+        const op = operation({ plugin: 'dsh-agent-registry', feature: 'agent', operation: 'create_agent' })
+        op.start()
+        const title = sanitizeAgentTitle(body && body.name)
         if (!title) {
-          writeJson(res, 400, { ok: false, error: 'name required' })
+          op.reject(CODES.REGISTRY_NAME_INVALID)
+          writeJson(res, 400, { ok: false, error: 'name required', code: CODES.REGISTRY_NAME_INVALID })
           return
         }
         const file = registryFile(dshHome)
         const loaded = await loadRegistry(file)
-        const used = new Set(Object.values(loaded.agents).map((row) => row.slug).filter(Boolean))
+        const disk = listClawSlugs(dshHome)
+        const registrySlugs = new Set(Object.values(loaded.agents).map((row) => row.slug).filter(Boolean))
+        const preferred = slugFromName(title, registrySlugs)
+        const used = new Set([...registrySlugs, ...disk])
         const slug = slugFromName(title, used)
-        const path = clawWorkspaceDir(dshHome, slug)
-        await mkdir(path, { recursive: true })
+        const skippedOrphan = preferred !== slug
+        let path
+        try {
+          op.stage('reserve_dir')
+          path = reserveClawWorkspace(dshHome, slug)
+        } catch (error) {
+          op.reject(CODES.REGISTRY_WORKSPACE_EXISTS, { state: 'clean' })
+          writeJson(res, 409, { ok: false, error: error && error.message ? error.message : 'workspace exists', code: CODES.REGISTRY_WORKSPACE_EXISTS })
+          return
+        }
         const files = seedFiles(title)
         await mkdir(join(path, 'memory'), { recursive: true })
         for (const [name, text] of Object.entries(files)) {
           await writeFile(join(path, name), text)
         }
         if (ctx.workspaceRegistry == null || typeof ctx.workspaceRegistry.create !== 'function') {
-          writeJson(res, 500, { ok: false, error: 'workspace registry unavailable' })
+          op.fail(CODES.REGISTRY_CREATE_FAILED, new Error('workspace registry unavailable'), {
+            state: 'partially_applied',
+            remainingArtifacts: ['workspace_dir', 'identity_files'],
+          })
+          writeJson(res, 500, { ok: false, error: 'workspace registry unavailable', code: CODES.REGISTRY_CREATE_FAILED })
           return
         }
         const workspace = await ctx.workspaceRegistry.create(path, title)
@@ -252,13 +328,54 @@ export function apply(ctx) {
           servers: defaults.servers,
         }))
         const agent = seeded.agent || bound.agent
-        await saveRegistry(file, seeded.registry || bound.registry)
-        if (agent.canonicalRoot && String(agent.canonicalRoot).indexOf('DSclaw') >= 0 && agent.policy) {
-          try {
+        op.stage('policy_write')
+        try {
+          if (agent.canonicalRoot && isClawHomePath(dshHome, agent.canonicalRoot) && agent.policy) {
             await writeFile(join(agent.canonicalRoot, 'policy.json'), JSON.stringify(agent.policy, null, 2) + '\n')
-          } catch { /* directory missing */ }
+          }
+        } catch (error) {
+          op.fail(CODES.REGISTRY_POLICY_WRITE_FAILED, error, {
+            state: 'partially_applied',
+            remainingArtifacts: ['workspace_dir', 'identity_files'],
+            agentId: agent.agentId,
+          })
+          writeJson(res, 500, { ok: false, error: 'policy write failed', code: CODES.REGISTRY_POLICY_WRITE_FAILED })
+          return
         }
+        op.stage('save_registry')
+        try {
+          await saveRegistry(file, seeded.registry || bound.registry)
+        } catch (error) {
+          op.fail(CODES.REGISTRY_SAVE_FAILED, error, {
+            state: 'partially_applied',
+            remainingArtifacts: ['workspace_dir', 'identity_files', 'policy_json'],
+            agentId: agent.agentId,
+          })
+          writeJson(res, 500, { ok: false, error: 'registry save failed', code: CODES.REGISTRY_SAVE_FAILED })
+          return
+        }
+        if (skippedOrphan) op.success({ agentId: agent.agentId, slug, code: CODES.REGISTRY_ORPHAN_SLUG_SKIPPED })
+        else op.success({ agentId: agent.agentId, slug })
         writeJson(res, 200, { ok: true, agent, clawHome: clawHome(dshHome) })
+      }),
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/dsh-agent-registry/diag',
+      handler: handle(async (_req, res, body) => {
+        const code = body && body.code
+        if (code !== CODES.REGISTRY_RESPONSE_STALE) {
+          writeJson(res, 400, { ok: false, error: 'unsupported diag code' })
+          return
+        }
+        const op = operation({
+          plugin: 'dsh-agent-registry',
+          feature: 'settings',
+          operation: (body && body.operation) || 'client_event',
+        })
+        op.start()
+        op.degraded(CODES.REGISTRY_RESPONSE_STALE, { skipReason: 'stale', state: 'clean' })
+        writeJson(res, 200, { ok: true })
       }),
     }),
     ctx.webServer.register({
@@ -272,17 +389,36 @@ export function apply(ctx) {
         }
         const file = registryFile(dshHome)
         const loaded = await loadRegistry(file)
+        const op = operation({ plugin: 'dsh-agent-registry', feature: 'policy', operation: 'save_policy', agentId })
+        op.start()
         const result = updateAgentPolicy(loaded, agentId, normalizePolicy(body && body.policy))
         if (!result.agent) {
-          writeJson(res, 404, { ok: false, error: 'agent not found' })
+          op.reject(CODES.REGISTRY_AGENT_NOT_FOUND)
+          writeJson(res, 404, { ok: false, error: 'agent not found', code: CODES.REGISTRY_AGENT_NOT_FOUND })
           return
         }
-        await saveRegistry(file, result.registry)
-        if (result.agent.canonicalRoot && String(result.agent.canonicalRoot).indexOf('DSclaw') >= 0) {
-          try {
+        op.stage('policy_write')
+        try {
+          if (result.agent.canonicalRoot && isClawHomePath(dshHome, result.agent.canonicalRoot)) {
             await writeFile(join(result.agent.canonicalRoot, 'policy.json'), JSON.stringify(result.agent.policy, null, 2) + '\n')
-          } catch { /* directory missing */ }
+          }
+        } catch (error) {
+          op.fail(CODES.REGISTRY_POLICY_WRITE_FAILED, error, { state: 'clean', agentId })
+          writeJson(res, 500, { ok: false, error: 'policy write failed', code: CODES.REGISTRY_POLICY_WRITE_FAILED })
+          return
         }
+        try {
+          await saveRegistry(file, result.registry)
+        } catch (error) {
+          op.fail(CODES.REGISTRY_SAVE_FAILED, error, {
+            state: 'partially_applied',
+            remainingArtifacts: ['policy_json'],
+            agentId,
+          })
+          writeJson(res, 500, { ok: false, error: 'registry save failed', code: CODES.REGISTRY_SAVE_FAILED })
+          return
+        }
+        op.success({ agentId })
         writeJson(res, 200, { ok: true, agent: result.agent })
       }),
     }),
@@ -302,12 +438,10 @@ export function apply(ctx) {
           writeJson(res, 404, { ok: false, error: 'agent not found' })
           return
         }
-        await saveRegistry(file, result.registry)
-        if (result.agent.canonicalRoot && String(result.agent.canonicalRoot).indexOf('DSclaw') >= 0) {
-          try {
-            await writeFile(join(result.agent.canonicalRoot, 'policy.json'), JSON.stringify(result.agent.policy, null, 2) + '\n')
-          } catch { /* directory missing */ }
+        if (result.agent.canonicalRoot && isClawHomePath(dshHome, result.agent.canonicalRoot)) {
+          await writeFile(join(result.agent.canonicalRoot, 'policy.json'), JSON.stringify(result.agent.policy, null, 2) + '\n')
         }
+        await saveRegistry(file, result.registry)
         writeJson(res, 200, { ok: true, agent: result.agent })
       }),
     }),

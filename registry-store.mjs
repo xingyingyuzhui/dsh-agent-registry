@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { clampClawPolicy, declaredOf, INIT_PRESET, normalizePolicy, presetIdForWorkspace } from './registry-presets.mjs'
 import { normalizeModel } from './registry-model.mjs'
 
@@ -206,11 +207,22 @@ export async function loadRegistry(file) {
   }
 }
 
+const registryQueues = new Map()
+
+function enqueueRegistry(file, fn) {
+  const prev = registryQueues.get(file) || Promise.resolve()
+  const next = prev.then(fn, fn)
+  registryQueues.set(file, next.then(() => {}, () => {}))
+  return next
+}
+
 export async function saveRegistry(file, registry) {
   const next = normalizeRegistry(registry)
-  await mkdir(dirname(file), { recursive: true })
-  const tmp = file + '.tmp'
-  await writeFile(tmp, JSON.stringify(next, null, 2) + '\n', 'utf8')
-  await rename(tmp, file)
-  return next
+  return enqueueRegistry(file, async () => {
+    await mkdir(dirname(file), { recursive: true })
+    const tmp = file + '.' + process.pid + '.' + randomUUID() + '.tmp'
+    await writeFile(tmp, JSON.stringify(next, null, 2) + '\n', 'utf8')
+    await rename(tmp, file)
+    return next
+  })
 }

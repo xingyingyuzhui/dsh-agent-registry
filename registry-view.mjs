@@ -190,14 +190,7 @@ export function isClawBoundSession(row, agent) {
   return isDsClawPath(row && (row.cwd || row.path))
 }
 
-export function nextPresetBind({ row, agent }) {
-  if (!row) return { action: 'idle', pending: null }
-  // wa-* is a registry label. Blank official-looking sessions that still
-  // carry a claw preset id are reset in tests; live runtime no longer
-  // calls agentPresets.select, because that remounts from the UI caller.
-  if (row.blank && (isClawPresetId(row.agentPreset) || (isClawBoundSession(row, agent) && !row.agentPreset))) {
-    return { action: 'select', preset: 'standard', pending: null }
-  }
+export function nextPresetBind() {
   return { action: 'idle', pending: null }
 }
 

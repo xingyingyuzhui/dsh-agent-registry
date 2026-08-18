@@ -12,6 +12,7 @@ import {
   optionAllowed,
   toggleTool,
 } from './registry-presets.mjs'
+import { CLIENT_CODES, formatObserveFail, newTraceId } from './registry-observe.mjs'
 
 const TABS = ['overview', 'persona', 'memory', 'model', 'permissions', 'skills']
 
@@ -55,9 +56,7 @@ function personaFromFiles(files) {
     soul: src['SOUL.md'] || '',
     tools: src['TOOLS.md'] || '',
     identity: src['IDENTITY.md'] || '',
-    user: src['USER.md'] || '',
     heartbeat: src['HEARTBEAT.md'] || '',
-    memory: src['MEMORY.md'] || '',
   }
 }
 
@@ -197,9 +196,15 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     }
 
     const root = agent && agent.files && agent.files.root
+    const fetchGen = React.useRef(0)
+    const rootRef = React.useRef(root)
+    rootRef.current = root
 
     React.useEffect(() => {
       setResetConfirm(false)
+      const gen = fetchGen.current + 1
+      fetchGen.current = gen
+      const ac = typeof AbortController === 'function' ? new AbortController() : null
       if (!root) {
         const blank = emptyPersona()
         setPersona(blank)
@@ -210,64 +215,95 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Identity': '1' },
         body: JSON.stringify({ root }),
+        signal: ac && ac.signal,
       }).then((res) => res.json()).then((data) => {
+        if (gen !== fetchGen.current) {
+          reportStale('load_persona')
+          return
+        }
         if (!data || data.ok !== true) return
         const next = personaFromFiles(data.files)
         setPersona((prev) => ({ ...prev, ...next }))
         setPersonaSaved((prev) => ({ ...prev, ...next }))
       }).catch(() => {})
-      reloadVault(root)
+      reloadVault(root, gen, ac && ac.signal)
+      return () => { if (ac) ac.abort() }
     }, [root])
 
-    function applyVault(data) {
-      if (!data || data.ok !== true) return
-      setVault(data)
-      if (data.daily) {
-        setDailyMeta({ today: data.daily.today, yesterday: data.daily.yesterday })
-        const daily = {
-          dailyToday: data.daily.todayText || '',
-          dailyYesterday: data.daily.yesterdayText || '',
-        }
-        setPersona((prev) => ({ ...prev, ...daily }))
-        setPersonaSaved((prev) => ({ ...prev, ...daily }))
-      }
+    function reportStale(name) {
+      fetch('/dsh-agent-registry/diag', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-DSH-Agent-Registry': '1',
+          'X-DSH-Trace': newTraceId(),
+        },
+        body: JSON.stringify({ code: CLIENT_CODES.REGISTRY_RESPONSE_STALE, operation: name }),
+      }).catch(() => {})
     }
 
-    function reloadVault(nextRoot) {
+    function applyVault(data, expectedRoot, gen) {
+      if ((gen != null && gen !== fetchGen.current) || (expectedRoot && expectedRoot !== rootRef.current)) {
+        reportStale('load_vault')
+        return
+      }
+      if (!data || data.ok !== true) return
+      setVault(data)
+      const next = {}
+      if (data.user && typeof data.user.raw === 'string') next.user = data.user.raw
+      if (data.memory && typeof data.memory.raw === 'string') next.memory = data.memory.raw
+      if (data.daily) {
+        setDailyMeta({ today: data.daily.today, yesterday: data.daily.yesterday })
+        next.dailyToday = data.daily.todayText || ''
+        next.dailyYesterday = data.daily.yesterdayText || ''
+      }
+      if (Object.keys(next).length === 0) return
+      setPersona((prev) => ({ ...prev, ...next }))
+      setPersonaSaved((prev) => ({ ...prev, ...next }))
+    }
+
+    function reloadVault(nextRoot, gen, signal) {
       const path = nextRoot || root
       if (!path) return Promise.resolve()
       return fetch('/dsh-agent-memory/read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
         body: JSON.stringify({ root: path }),
-      }).then((res) => res.json()).then(applyVault).catch(() => {})
+        signal,
+      }).then((res) => res.json()).then((data) => applyVault(data, path, gen)).catch(() => {})
     }
 
     function saveCoreFile() {
       const spec = coreSpec(coreFile, dailyMeta)
       if (!root || !spec) return
       const content = persona[spec.key]
+      const saveRoot = root
+      const saveGen = fetchGen.current
       setPersonaBusy(true)
       const request = spec.via === 'daily'
         ? fetch('/dsh-agent-memory/write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
-          body: JSON.stringify({ root, action: 'save', target: 'daily', key: spec.dateKey, content }),
+          body: JSON.stringify({ root: saveRoot, action: 'save', target: 'daily', key: spec.dateKey, content }),
         }).then((res) => res.json())
         : spec.via === 'memory'
         ? fetch('/dsh-agent-memory/write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
-          body: JSON.stringify({ root, action: 'save', target: spec.vault, content }),
+          body: JSON.stringify({ root: saveRoot, action: 'save', target: spec.vault, content }),
         }).then((res) => res.json())
         : fetch('/dsh-agent-identity/write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Identity': '1' },
-          body: JSON.stringify({ root, files: { [spec.file]: content } }),
+          body: JSON.stringify({ root: saveRoot, files: { [spec.file]: content } }),
         }).then((res) => res.json())
       request.then((row) => {
+        if (saveGen !== fetchGen.current || saveRoot !== rootRef.current) {
+          reportStale('save_persona')
+          return
+        }
         if (!row || row.ok !== true) {
-          toast((row && row.error) || t('fail'))
+          toast(formatObserveFail(row, t('fail')))
           return
         }
         setPersonaSaved((prev) => ({ ...prev, [spec.key]: content }))

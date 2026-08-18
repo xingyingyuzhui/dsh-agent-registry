@@ -106,6 +106,9 @@ function normalizePolicy(raw, fallbackPreset) {
   const serversIn = value.servers && typeof value.servers === 'object' ? value.servers : {}
   const depth = Number(delegationIn.maxDepth)
   const roles = asStringList(delegationIn.roles)
+  const maxChildren = Number(delegationIn.maxChildren)
+  const maxOutputBytes = Number(delegationIn.maxOutputBytes)
+  const sandboxIn = value.sandbox && typeof value.sandbox === 'object' ? value.sandbox : {}
   return {
     preset,
     enforced: false,
@@ -120,8 +123,11 @@ function normalizePolicy(raw, fallbackPreset) {
     },
     delegation: {
       maxDepth: Number.isFinite(depth) && depth >= 0 ? Math.min(8, Math.floor(depth)) : base.delegation.maxDepth,
-      roles: roles.length ? roles : (base.delegation.roles || []).slice(),
+      roles: Array.isArray(delegationIn.roles) ? roles : (base.delegation.roles || []).slice(),
+      maxChildren: Number.isFinite(maxChildren) && maxChildren >= 0 ? Math.min(32, Math.floor(maxChildren)) : undefined,
+      maxOutputBytes: Number.isFinite(maxOutputBytes) && maxOutputBytes >= 256 ? Math.min(1024 * 1024, Math.floor(maxOutputBytes)) : undefined,
     },
+    sandbox: sandboxIn.requireEnforcement === 'full' ? { requireEnforcement: 'full' } : undefined,
     approval: pick(APPROVAL_IDS, value.approval, base.approval),
     mcp: pick(MCP_IDS, value.mcp, base.mcp),
     servers: {
@@ -177,6 +183,17 @@ function tighter(rank, left, right) {
   return a <= b ? left : right
 }
 
+function tighterCap(left, right) {
+  const a = Number(left)
+  const b = Number(right)
+  const leftOk = Number.isFinite(a)
+  const rightOk = Number.isFinite(b)
+  if (leftOk && rightOk) return Math.min(a, b)
+  if (leftOk) return a
+  if (rightOk) return b
+  return undefined
+}
+
 function intersectPolicies(...layers) {
   const list = layers.filter(Boolean).map((row) => normalizePolicy(row))
   if (list.length === 0) return normalizePolicy({ preset: INIT_PRESET })
@@ -200,7 +217,12 @@ function intersectPolicies(...layers) {
       delegation: {
         maxDepth: Math.min(acc.delegation.maxDepth, row.delegation.maxDepth),
         roles: (acc.delegation.roles || []).filter((role) => (row.delegation.roles || []).includes(role)),
+        maxChildren: tighterCap(acc.delegation.maxChildren, row.delegation.maxChildren),
+        maxOutputBytes: tighterCap(acc.delegation.maxOutputBytes, row.delegation.maxOutputBytes),
       },
+      sandbox: (acc.sandbox && acc.sandbox.requireEnforcement === 'full') || (row.sandbox && row.sandbox.requireEnforcement === 'full')
+        ? { requireEnforcement: 'full' }
+        : undefined,
       skills: {
         deny: [...new Set([
           ...((acc.skills && acc.skills.deny) || []),
@@ -236,7 +258,6 @@ function clampPolicy(policy, ceiling) {
 function sealReadOnlyRuntime(policy) {
   const next = normalizePolicy(policy)
   if (!next.files || next.files.write !== 'none') return next
-  if (next.files.read === 'all') return next
   const allow = (next.tools.allow || []).filter((id) => id !== 'bash')
   const deny = (next.tools.deny || []).slice()
   if (deny.indexOf('bash') < 0) deny.push('bash')
@@ -413,13 +434,11 @@ function allowTool(policy, name, args) {
     if (!server) return false
     return mcpServerAllowed(policy, server)
   }
-  if ((id.includes('subagent') || id.includes('delegate')) && policy.delegation.maxDepth <= 0) {
-    return false
+  if (id.includes('subagent') || id.includes('delegate')) {
+    return (policy.delegation && policy.delegation.maxDepth || 0) > 0
   }
   const cls = classifyTool(name, args)
-  if (cls === 'other') {
-    return policy.files.write !== 'none' || policy.shell !== 'deny'
-  }
+  if (cls === 'other') return false
   if (cls === 'edit' || cls === 'write' || cls === 'apply_patch') {
     if (cls === 'apply_patch') return isToolEnabled(policy, 'apply_patch') || isToolEnabled(policy, 'edit')
     return isToolEnabled(policy, cls)
@@ -1432,14 +1451,7 @@ function isClawBoundSession(row, agent) {
   return isDsClawPath(row && (row.cwd || row.path))
 }
 
-function nextPresetBind({ row, agent }) {
-  if (!row) return { action: 'idle', pending: null }
-  // wa-* is a registry label. Blank official-looking sessions that still
-  // carry a claw preset id are reset in tests; live runtime no longer
-  // calls agentPresets.select, because that remounts from the UI caller.
-  if (row.blank && (isClawPresetId(row.agentPreset) || (isClawBoundSession(row, agent) && !row.agentPreset))) {
-    return { action: 'select', preset: 'standard', pending: null }
-  }
+function nextPresetBind() {
   return { action: 'idle', pending: null }
 }
 
@@ -1486,6 +1498,30 @@ function filterClawSearch(agents, query, titleOf) {
   return { query: q, agents: out, forcedOpen }
 }
 
+const CLIENT_CODES = {
+  REGISTRY_RESPONSE_STALE: 'REGISTRY_RESPONSE_STALE',
+}
+
+function newTraceId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const buf = new Uint8Array(6)
+    crypto.getRandomValues(buf)
+    let hex = ''
+    for (let i = 0; i < buf.length; i++) hex += buf[i].toString(16).padStart(2, '0')
+    return 'tr_' + hex
+  }
+  return 'tr_' + Math.random().toString(16).slice(2, 10) + Date.now().toString(16).slice(-4)
+}
+
+function formatObserveFail(data, fallback) {
+  const msg = (data && (data.error || data.message)) || fallback || 'failed'
+  const code = data && data.code
+  const tr = data && data.traceId
+  if (code && tr) return msg + '（' + code + ' · ' + tr + '）'
+  if (code) return msg + '（' + code + '）'
+  return String(msg)
+}
+
 const TABS = ['overview', 'persona', 'memory', 'model', 'permissions', 'skills']
 
 function dateStamp(now) {
@@ -1528,9 +1564,7 @@ function personaFromFiles(files) {
     soul: src['SOUL.md'] || '',
     tools: src['TOOLS.md'] || '',
     identity: src['IDENTITY.md'] || '',
-    user: src['USER.md'] || '',
     heartbeat: src['HEARTBEAT.md'] || '',
-    memory: src['MEMORY.md'] || '',
   }
 }
 
@@ -1670,9 +1704,15 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
     }
 
     const root = agent && agent.files && agent.files.root
+    const fetchGen = React.useRef(0)
+    const rootRef = React.useRef(root)
+    rootRef.current = root
 
     React.useEffect(() => {
       setResetConfirm(false)
+      const gen = fetchGen.current + 1
+      fetchGen.current = gen
+      const ac = typeof AbortController === 'function' ? new AbortController() : null
       if (!root) {
         const blank = emptyPersona()
         setPersona(blank)
@@ -1683,64 +1723,95 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Identity': '1' },
         body: JSON.stringify({ root }),
+        signal: ac && ac.signal,
       }).then((res) => res.json()).then((data) => {
+        if (gen !== fetchGen.current) {
+          reportStale('load_persona')
+          return
+        }
         if (!data || data.ok !== true) return
         const next = personaFromFiles(data.files)
         setPersona((prev) => ({ ...prev, ...next }))
         setPersonaSaved((prev) => ({ ...prev, ...next }))
       }).catch(() => {})
-      reloadVault(root)
+      reloadVault(root, gen, ac && ac.signal)
+      return () => { if (ac) ac.abort() }
     }, [root])
 
-    function applyVault(data) {
-      if (!data || data.ok !== true) return
-      setVault(data)
-      if (data.daily) {
-        setDailyMeta({ today: data.daily.today, yesterday: data.daily.yesterday })
-        const daily = {
-          dailyToday: data.daily.todayText || '',
-          dailyYesterday: data.daily.yesterdayText || '',
-        }
-        setPersona((prev) => ({ ...prev, ...daily }))
-        setPersonaSaved((prev) => ({ ...prev, ...daily }))
-      }
+    function reportStale(name) {
+      fetch('/dsh-agent-registry/diag', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-DSH-Agent-Registry': '1',
+          'X-DSH-Trace': newTraceId(),
+        },
+        body: JSON.stringify({ code: CLIENT_CODES.REGISTRY_RESPONSE_STALE, operation: name }),
+      }).catch(() => {})
     }
 
-    function reloadVault(nextRoot) {
+    function applyVault(data, expectedRoot, gen) {
+      if ((gen != null && gen !== fetchGen.current) || (expectedRoot && expectedRoot !== rootRef.current)) {
+        reportStale('load_vault')
+        return
+      }
+      if (!data || data.ok !== true) return
+      setVault(data)
+      const next = {}
+      if (data.user && typeof data.user.raw === 'string') next.user = data.user.raw
+      if (data.memory && typeof data.memory.raw === 'string') next.memory = data.memory.raw
+      if (data.daily) {
+        setDailyMeta({ today: data.daily.today, yesterday: data.daily.yesterday })
+        next.dailyToday = data.daily.todayText || ''
+        next.dailyYesterday = data.daily.yesterdayText || ''
+      }
+      if (Object.keys(next).length === 0) return
+      setPersona((prev) => ({ ...prev, ...next }))
+      setPersonaSaved((prev) => ({ ...prev, ...next }))
+    }
+
+    function reloadVault(nextRoot, gen, signal) {
       const path = nextRoot || root
       if (!path) return Promise.resolve()
       return fetch('/dsh-agent-memory/read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
         body: JSON.stringify({ root: path }),
-      }).then((res) => res.json()).then(applyVault).catch(() => {})
+        signal,
+      }).then((res) => res.json()).then((data) => applyVault(data, path, gen)).catch(() => {})
     }
 
     function saveCoreFile() {
       const spec = coreSpec(coreFile, dailyMeta)
       if (!root || !spec) return
       const content = persona[spec.key]
+      const saveRoot = root
+      const saveGen = fetchGen.current
       setPersonaBusy(true)
       const request = spec.via === 'daily'
         ? fetch('/dsh-agent-memory/write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
-          body: JSON.stringify({ root, action: 'save', target: 'daily', key: spec.dateKey, content }),
+          body: JSON.stringify({ root: saveRoot, action: 'save', target: 'daily', key: spec.dateKey, content }),
         }).then((res) => res.json())
         : spec.via === 'memory'
         ? fetch('/dsh-agent-memory/write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Memory': '1' },
-          body: JSON.stringify({ root, action: 'save', target: spec.vault, content }),
+          body: JSON.stringify({ root: saveRoot, action: 'save', target: spec.vault, content }),
         }).then((res) => res.json())
         : fetch('/dsh-agent-identity/write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Identity': '1' },
-          body: JSON.stringify({ root, files: { [spec.file]: content } }),
+          body: JSON.stringify({ root: saveRoot, files: { [spec.file]: content } }),
         }).then((res) => res.json())
       request.then((row) => {
+        if (saveGen !== fetchGen.current || saveRoot !== rootRef.current) {
+          reportStale('save_persona')
+          return
+        }
         if (!row || row.ok !== true) {
-          toast((row && row.error) || t('fail'))
+          toast(formatObserveFail(row, t('fail')))
           return
         }
         setPersonaSaved((prev) => ({ ...prev, [spec.key]: content }))
@@ -3924,13 +3995,20 @@ function apply(ctx) {
   }
 
   function post(path, payload) {
+    const traceId = newTraceId()
     return fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Registry': '1' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-DSH-Agent-Registry': '1',
+        'X-DSH-Trace': traceId,
+      },
       body: JSON.stringify(payload || {}),
     }).then((res) => res.json().then((data) => {
       if (!res.ok && (!data || data.ok !== true)) {
-        const error = new Error((data && data.error) || ('http ' + res.status))
+        const error = new Error(formatObserveFail(data, 'http ' + res.status))
+        error.code = data && data.code
+        error.traceId = (data && data.traceId) || traceId
         throw error
       }
       return data
@@ -4001,15 +4079,16 @@ function apply(ctx) {
         Promise.resolve(api.sessions.create({ workspaceId, agentPreset: 'standard' })).then((res) => {
           const value = res && res.result && res.result.ok === true ? res.result.value : null
           const id = value && value.sessionId
-          if (id && ctx.sessions && typeof ctx.sessions.open === 'function') ctx.sessions.open(id)
+          if (!id) throw new Error('session create failed')
+          if (ctx.sessions && typeof ctx.sessions.open === 'function') ctx.sessions.open(id)
           const model = agent && agent.model
-          if (id && model && model.provider && model.model && api.sessions && typeof api.sessions.selectModel === 'function') {
-            return api.sessions.selectModel({
+          if (model && model.provider && model.model && api.sessions && typeof api.sessions.selectModel === 'function') {
+            return Promise.resolve(api.sessions.selectModel({
               sessionId: id,
               provider: model.provider,
               model: model.model,
               reasoningEffort: model.reasoningEffort,
-            })
+            })).catch(() => {})
           }
         }).catch(() => {
           if (ctx.workspaces && typeof ctx.workspaces.startSession === 'function') ctx.workspaces.startSession(workspaceId)
@@ -4025,7 +4104,7 @@ function apply(ctx) {
       return post('/dsh-agent-registry/rename', { agentId, name }).then((data) => {
         const workspaceId = data && data.agent && data.agent.workspaceId
         if (workspaceId && ctx.workspaces && typeof ctx.workspaces.rename === 'function') {
-          return Promise.resolve(ctx.workspaces.rename(workspaceId, name)).catch(() => {}).then(() => loadProjected())
+          return Promise.resolve(ctx.workspaces.rename(workspaceId, name)).then(() => loadProjected())
         }
         return loadProjected()
       })
