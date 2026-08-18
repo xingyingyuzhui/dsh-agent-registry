@@ -299,7 +299,12 @@ export function apply(ctx) {
     let unsubSessions = function () {}
     const stopPresetList = wrapPresetList(connectionApi())
     const stopWorkspaceList = wrapWorkspaceList(ctx.workspaces && ctx.workspaces.list, function () {
-      return clawHideKeys(projected)
+      const current = currentSessionOf(ctx.sessions)
+      const row = current && current.row
+      return Object.assign({}, clawHideKeys(projected), {
+        currentSessionId: current && current.id ? current.id : '',
+        currentCwd: row && (row.cwd || row.path) ? String(row.cwd || row.path) : '',
+      })
     })
     const stopSessionSearch = wrapSessionSearch(ctx.sessions, function () {
       return clawHideKeys(projected)

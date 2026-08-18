@@ -50,6 +50,7 @@ import {
   shouldShowClawRoster,
   wrapPresetList,
   wrapWorkspaceList,
+  itemOwnsCurrentSession,
 } from '../registry-isolate.mjs'
 
 test('agent ids are stable per workspace id', () => {
@@ -470,6 +471,42 @@ test('official pickers drop claw roster rows before render', () => {
   assert.ok(state.archivedSessionIds.indexOf('session-claw') >= 0)
   assert.ok(state.archivedSessionIds.indexOf('session-off') < 0)
   assert.equal(shouldShowClawRoster(), false)
+})
+
+test('isolate keeps the open Claw session workspace so the composer can type', () => {
+  const keys = Object.assign(clawHideKeys({ agents: [] }), {
+    currentSessionId: 'session-claw',
+    currentCwd: '/Users/qin/.dsh/DSclaw/test1',
+  })
+  const claw = { workspaceId: 'claw', title: 'test1', path: '/Users/qin/.dsh/DSclaw/test1', sessionIds: ['session-claw'] }
+  const other = { workspaceId: 'claw2', title: 'test2', path: '/Users/qin/.dsh/DSclaw/test2', sessionIds: ['session-other'] }
+  const official = { workspaceId: 'official', title: 'DSH', path: '/Users/qin/DSH', sessionIds: ['session-off'] }
+  assert.equal(itemOwnsCurrentSession(claw, keys), true)
+  assert.equal(itemOwnsCurrentSession(other, keys), false)
+  const state = isolateWorkspaceSnapshot({
+    items: [official, claw, other],
+    recentWorkspaceId: 'claw',
+    archivedSessionIds: [],
+  }, keys)
+  assert.deepEqual(state.items.map((row) => row.workspaceId), ['official', 'claw'])
+  assert.ok(state.items[1].sessionIds.includes('session-claw'))
+  assert.ok(state.archivedSessionIds.indexOf('session-claw') < 0)
+  assert.ok(state.archivedSessionIds.indexOf('session-other') >= 0)
+})
+
+test('isolate matches an open Claw session by cwd before sessionIds land', () => {
+  const keys = Object.assign(clawHideKeys({ agents: [] }), {
+    currentSessionId: 'session-new',
+    currentCwd: '/Users/qin/.dsh/DSclaw/test1',
+  })
+  const state = isolateWorkspaceSnapshot({
+    items: [
+      { workspaceId: 'official', path: '/Users/qin/DSH', sessionIds: [] },
+      { workspaceId: 'claw', path: '/Users/qin/.dsh/DSclaw/test1', sessionIds: [] },
+    ],
+    archivedSessionIds: [],
+  }, keys)
+  assert.deepEqual(state.items.map((row) => row.workspaceId), ['official', 'claw'])
 })
 
 test('wrapped preset list never returns claw copies, including settings', async () => {

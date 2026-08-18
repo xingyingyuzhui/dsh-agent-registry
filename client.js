@@ -3639,6 +3639,24 @@ function isOfficialWorkspaceItem(item, keys) {
   return true
 }
 
+function itemOwnsCurrentSession(item, keys) {
+  if (item == null || keys == null) return false
+  const currentId = keys.currentSessionId ? String(keys.currentSessionId) : ''
+  const currentCwd = keys.currentCwd ? String(keys.currentCwd).replace(/\\/g, '/') : ''
+  if (currentId) {
+    const rows = item.sessionIds
+    if (Array.isArray(rows)) {
+      for (let i = 0; i < rows.length; i++) {
+        if (String(rows[i]) === currentId) return true
+      }
+    }
+  }
+  if (!currentCwd || !isDsClawPath(currentCwd)) return false
+  const path = String(item.path || item.cwd || '').replace(/\\/g, '/')
+  if (!path) return false
+  return path === currentCwd || currentCwd.indexOf(path + '/') === 0 || path.indexOf(currentCwd + '/') === 0
+}
+
 function clawSessionIdsFromWorkspaces(items, keys) {
   const ids = new Set()
   const list = Array.isArray(items) ? items : []
@@ -3660,7 +3678,12 @@ function clawSessionIdsFromWorkspaces(items, keys) {
 function isolateWorkspaceSnapshot(state, keys) {
   if (state == null || !Array.isArray(state.items)) return state
   const hidden = clawSessionIdsFromWorkspaces(state.items, keys)
-  const items = state.items.filter((item) => isOfficialWorkspaceItem(item, keys))
+  const currentId = keys && keys.currentSessionId ? String(keys.currentSessionId) : ''
+  // Official composer stays inert unless items owns the open session. Keep
+  // only that Claw workspace; drop the rest from official lists.
+  const items = state.items.filter((item) => (
+    isOfficialWorkspaceItem(item, keys) || itemOwnsCurrentSession(item, keys)
+  ))
   const archived = []
   const seen = new Set()
   const prev = Array.isArray(state.archivedSessionIds) ? state.archivedSessionIds : []
@@ -3671,7 +3694,7 @@ function isolateWorkspaceSnapshot(state, keys) {
     archived.push(id)
   }
   for (const id of hidden) {
-    if (seen.has(id)) continue
+    if (id === currentId || seen.has(id)) continue
     seen.add(id)
     archived.push(id)
   }
@@ -3716,17 +3739,48 @@ function wrapWorkspaceList(list, keysOf) {
   }
   const origSet = list.set.bind(list)
   const origUpdate = typeof list.update === 'function' ? list.update.bind(list) : null
+  const clawItems = new Map()
   function keys() {
     return typeof keysOf === 'function' ? keysOf() : keysOf
   }
+  function ingest(items, nextKeys) {
+    const rows = Array.isArray(items) ? items : []
+    for (let i = 0; i < rows.length; i++) {
+      const item = rows[i]
+      if (!item || item.workspaceId == null) continue
+      if (!isOfficialWorkspaceItem(item, nextKeys)) clawItems.set(String(item.workspaceId), item)
+    }
+    const seen = new Set()
+    const merged = []
+    for (let i = 0; i < rows.length; i++) {
+      const item = rows[i]
+      if (!item || item.workspaceId == null) continue
+      const id = String(item.workspaceId)
+      if (seen.has(id)) continue
+      seen.add(id)
+      merged.push(item)
+    }
+    for (const item of clawItems.values()) {
+      const id = String(item.workspaceId)
+      if (seen.has(id)) continue
+      seen.add(id)
+      merged.push(item)
+    }
+    return merged
+  }
+  function isolate(next) {
+    const nextKeys = keys()
+    if (next == null || !Array.isArray(next.items)) return isolateWorkspaceSnapshot(next, nextKeys)
+    return isolateWorkspaceSnapshot({ ...next, items: ingest(next.items, nextKeys) }, nextKeys)
+  }
   list.set = function set(next) {
-    origSet(isolateWorkspaceSnapshot(next, keys()))
+    origSet(isolate(next))
   }
   if (origUpdate) {
     list.update = function update(mutator) {
       origUpdate((draft) => {
         if (typeof mutator === 'function') mutator(draft)
-        const isolated = isolateWorkspaceSnapshot(draft, keys())
+        const isolated = isolate(draft)
         if (isolated === draft) return
         draft.items = isolated.items
         draft.archivedSessionIds = isolated.archivedSessionIds
@@ -3734,7 +3788,7 @@ function wrapWorkspaceList(list, keysOf) {
       })
     }
   }
-  origSet(isolateWorkspaceSnapshot(list.getSnapshot(), keys()))
+  origSet(isolate(list.getSnapshot()))
   return function () {
     list.set = origSet
     if (origUpdate) list.update = origUpdate
@@ -4055,7 +4109,12 @@ function apply(ctx) {
     let unsubSessions = function () {}
     const stopPresetList = wrapPresetList(connectionApi())
     const stopWorkspaceList = wrapWorkspaceList(ctx.workspaces && ctx.workspaces.list, function () {
-      return clawHideKeys(projected)
+      const current = currentSessionOf(ctx.sessions)
+      const row = current && current.row
+      return Object.assign({}, clawHideKeys(projected), {
+        currentSessionId: current && current.id ? current.id : '',
+        currentCwd: row && (row.cwd || row.path) ? String(row.cwd || row.path) : '',
+      })
     })
     const stopSessionSearch = wrapSessionSearch(ctx.sessions, function () {
       return clawHideKeys(projected)
