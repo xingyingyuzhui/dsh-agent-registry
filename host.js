@@ -1,10 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { defaultDshHome, loadRegistry, loadRegistrySync, registryFile, saveRegistry } from './registry-store.mjs'
+import { defaultDshHome, loadRegistry, registryFile, saveRegistry } from './registry-store.mjs'
 import { defaultsFile, loadDefaultsSync } from '../dsh-agent-policy/policy-store.mjs'
 import { clearClawDefault, normalizePolicy } from './registry-presets.mjs'
 import { archiveAgent, explainAgent, identityPaths, listProjected, renameAgent, restoreAgent, syncBindings, updateAgentModel, updateAgentPolicy, updateAgentSkills } from './registry-logic.mjs'
-import { listModelCatalog, normalizeModel, selectionForCurrentSession } from './registry-model.mjs'
+import { listModelCatalog, normalizeModel } from './registry-model.mjs'
 import {
   bindCreatedAgent,
   clawHome,
@@ -21,12 +21,9 @@ const BODY_CAP = 65536
 const LOOPBACK_ORIGIN = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/
 let dshHome = defaultDshHome()
 
-let officialSelection = () => null
-
 const _internal = {
   setDshHome(dir) { dshHome = dir },
   getDshHome() { return dshHome },
-  readOfficialSelection() { return officialSelection() },
 }
 export { _internal }
 
@@ -84,24 +81,6 @@ function optionalService(ctx, key) {
   }
   if (ctx && Object.prototype.hasOwnProperty.call(ctx, key)) return ctx[key]
   return undefined
-}
-
-function pinAgentDefaultModel(ctx) {
-  const defaults = optionalService(ctx, 'agentDefaultModel')
-  if (!defaults || typeof defaults.currentSelection !== 'function') return function () {}
-  const official = defaults.currentSelection.bind(defaults)
-  officialSelection = official
-  defaults.currentSelection = function currentSelection() {
-    const sessions = optionalService(ctx, 'sessions')
-    const snap = sessions && sessions.list && typeof sessions.list.getSnapshot === 'function'
-      ? sessions.list.getSnapshot()
-      : null
-    return selectionForCurrentSession(loadRegistrySync(registryFile(dshHome)), official(), snap)
-  }
-  return function () {
-    defaults.currentSelection = official
-    officialSelection = () => null
-  }
 }
 
 function listWorkspaces(ctx) {
@@ -167,14 +146,6 @@ export function apply(ctx) {
   }
 
   const optionalStops = []
-  if (typeof ctx.inject === 'function') {
-    ctx.inject(['agentDefaultModel'], (sub) => {
-      const stop = pinAgentDefaultModel(sub)
-      sub.effect(() => () => stop())
-    })
-  } else {
-    optionalStops.push(pinAgentDefaultModel(ctx))
-  }
 
   const routes = [
     ctx.webServer.register({
@@ -344,8 +315,7 @@ export function apply(ctx) {
       kind: 'exact',
       path: '/dsh-agent-registry/models',
       handler: handle(async (_req, res) => {
-        const official = normalizeModel(_internal.readOfficialSelection())
-          || normalizeModel(optionalService(ctx, 'agentDefaultModel') && optionalService(ctx, 'agentDefaultModel').currentSelection())
+        const official = normalizeModel(optionalService(ctx, 'agentDefaultModel') && optionalService(ctx, 'agentDefaultModel').currentSelection())
         const groups = await listModelCatalog(optionalService(ctx, 'llm'))
         writeJson(res, 200, { ok: true, official, groups })
       }),

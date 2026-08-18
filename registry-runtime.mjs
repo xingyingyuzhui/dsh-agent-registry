@@ -126,6 +126,15 @@ export function apply(ctx) {
           const value = res && res.result && res.result.ok === true ? res.result.value : null
           const id = value && value.sessionId
           if (id && ctx.sessions && typeof ctx.sessions.open === 'function') ctx.sessions.open(id)
+          const model = agent && agent.model
+          if (id && model && model.provider && model.model && api.sessions && typeof api.sessions.selectModel === 'function') {
+            return api.sessions.selectModel({
+              sessionId: id,
+              provider: model.provider,
+              model: model.model,
+              reasoningEffort: model.reasoningEffort,
+            })
+          }
         }).catch(() => {
           if (ctx.workspaces && typeof ctx.workspaces.startSession === 'function') ctx.workspaces.startSession(workspaceId)
         })
