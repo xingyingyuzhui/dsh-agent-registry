@@ -201,6 +201,7 @@ export function nextPresetBind({ row, agent, pending, liveIds }) {
   }
   const preset = (pending && pending.preset) || boundPresetOf(agent)
   if (!preset || (live.size > 0 && !live.has(preset))) {
+    if (live.size > 0) return { action: 'select', preset: 'standard', pending: null }
     return { action: 'idle', pending: null }
   }
   if (!row.blank || row.agentPreset === preset) {

@@ -125,42 +125,29 @@ export function isIsolatedMinimalClone(text) {
   return src.includes('dsh-tool-bash-persistent') || src.includes('dsh-tool-str-replace-editor')
 }
 
-export async function mountWithClawFallback(origMount, id, agentCtx, fallbackId) {
-  const fallback = fallbackId || 'standard'
+export async function rewriteIsolatedMinimalClones(presets, io) {
+  if (presets == null || typeof presets.list !== 'function' || io == null) return { repaired: [] }
+  const list = await presets.list()
+  const source = list.find((row) => row && TEMPLATE_SOURCE_CANDIDATES.includes(row.id) && row.path)
+  if (!source) return { repaired: [] }
+  let body = ''
   try {
-    return await origMount(agentCtx, id)
-  } catch (error) {
-    if (id === fallback || !isClawPresetId(id)) throw error
-    return origMount(agentCtx, fallback)
-  }
-}
-
-export async function repairIsolatedMinimalClones(presets, io) {
-  if (presets == null || typeof presets.list !== 'function' || typeof presets.copy !== 'function' || io == null) {
+    body = await io.readFile(source.path, 'utf8')
+  } catch {
     return { repaired: [] }
   }
-  const list = await presets.list()
-  const ids = new Set(list.map((row) => row && row.id).filter(Boolean))
-  const source = TEMPLATE_SOURCE_CANDIDATES.find((id) => ids.has(id))
-  if (!source) return { repaired: [] }
+  if (!body) return { repaired: [] }
   const repaired = []
-  const rows = list.filter((row) => row && isClawPresetId(row.id) && row.path)
-  rows.sort((a, b) => (a.id === TEMPLATE_ID ? -1 : b.id === TEMPLATE_ID ? 1 : 0))
-  for (const row of rows) {
+  for (const row of list) {
+    if (!row || !isClawPresetId(row.id) || !row.path) continue
     let text = ''
     try {
       text = await io.readFile(row.path, 'utf8')
     } catch {
       continue
     }
-    if (!isIsolatedMinimalClone(text)) continue
-    const from = row.id === TEMPLATE_ID ? source : (ids.has(TEMPLATE_ID) ? TEMPLATE_ID : source)
-    if (typeof presets.remove === 'function') {
-      await presets.remove(row.id)
-      ids.delete(row.id)
-    }
-    await presets.copy(from, row.id, row.name || row.id)
-    ids.add(row.id)
+    if (!isIsolatedMinimalClone(text) || text === body) continue
+    await io.writeFile(row.path, body)
     repaired.push(row.id)
   }
   return { repaired }

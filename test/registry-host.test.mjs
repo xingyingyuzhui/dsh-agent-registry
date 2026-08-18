@@ -102,41 +102,27 @@ test('list handler does not bind ordinary workspaces', async () => {
   assert.match(payload.clawHome, /DSclaw/)
 })
 
-test('missing claw preset ids resolve to standard on the host', async () => {
-  const seen = []
+test('host does not wrap agentPresets composition APIs', () => {
+  const resolve = async (id) => ({ id })
+  const mount = async () => ({})
+  const recompose = async () => ({})
   const ctx = {
     workspaceRegistry: { list() { return [] } },
     agentPresets: {
       defaultId: 'standard',
       authorable: true,
-      async list() {
-        return [
-          { id: 'standard' },
-          { id: 'code' },
-          { id: 'minimal' },
-          { id: 'cordis' },
-          { id: 'wa-template' },
-          { id: 'wa-test1' },
-        ]
-      },
+      async list() { return [] },
+      resolve,
+      mount,
+      recompose,
       async copy() {},
-      async resolve(id) {
-        seen.push(id)
-        if (id === 'standard' || id === 'wa-test1') return { id }
-        const err = new Error('agent-presets: preset "' + id + '" not found')
-        throw err
-      },
     },
     webServer: { register() { return () => {} } },
-    effect(factory) {
-      ctx._stop = factory()
-    },
+    effect(factory) { ctx._stop = factory() },
   }
   apply(ctx)
-  const missing = await ctx.agentPresets.resolve('wa-2e263a19-08cd-4274-b2af-42286f96b517')
-  assert.deepEqual(missing, { id: 'standard' })
-  const live = await ctx.agentPresets.resolve('wa-test1')
-  assert.deepEqual(live, { id: 'wa-test1' })
-  assert.deepEqual(seen, ['standard', 'wa-test1'])
+  assert.equal(ctx.agentPresets.resolve, resolve)
+  assert.equal(ctx.agentPresets.mount, mount)
+  assert.equal(ctx.agentPresets.recompose, recompose)
   ctx._stop()
 })
