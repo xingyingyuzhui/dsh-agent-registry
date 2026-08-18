@@ -29,6 +29,7 @@ const PRESETS = {
     delegation: { maxDepth: 8, roles: ['research', 'reviewer', 'developer', 'release', 'public'] },
     approval: 'never',
     mcp: 'init-defaults',
+    servers: { allow: [], deny: [] },
   },
   research: {
     files: { read: 'workspace', write: 'none' },
@@ -37,6 +38,7 @@ const PRESETS = {
     delegation: { maxDepth: 1, roles: [] },
     approval: 'never',
     mcp: 'init-defaults',
+    servers: { allow: [], deny: [] },
   },
   developer: {
     files: { read: 'workspace', write: 'workspace' },
@@ -45,6 +47,7 @@ const PRESETS = {
     delegation: { maxDepth: 1, roles: ['research', 'reviewer'] },
     approval: 'ask-external',
     mcp: 'init-defaults',
+    servers: { allow: [], deny: [] },
   },
   reviewer: {
     files: { read: 'workspace', write: 'none' },
@@ -53,6 +56,7 @@ const PRESETS = {
     delegation: { maxDepth: 1, roles: [] },
     approval: 'never',
     mcp: 'init-defaults',
+    servers: { allow: [], deny: [] },
   },
   release: {
     files: { read: 'workspace', write: 'none' },
@@ -61,6 +65,7 @@ const PRESETS = {
     delegation: { maxDepth: 1, roles: [] },
     approval: 'ask-always',
     mcp: 'explicit',
+    servers: { allow: [], deny: [] },
   },
   public: {
     files: { read: 'none', write: 'none' },
@@ -69,6 +74,7 @@ const PRESETS = {
     delegation: { maxDepth: 0, roles: [] },
     approval: 'never',
     mcp: 'none',
+    servers: { allow: [], deny: [] },
   },
 }
 
@@ -97,6 +103,7 @@ function normalizePolicy(raw, fallbackPreset) {
   const filesIn = value.files && typeof value.files === 'object' ? value.files : {}
   const toolsIn = value.tools && typeof value.tools === 'object' ? value.tools : {}
   const delegationIn = value.delegation && typeof value.delegation === 'object' ? value.delegation : {}
+  const serversIn = value.servers && typeof value.servers === 'object' ? value.servers : {}
   const depth = Number(delegationIn.maxDepth)
   const roles = asStringList(delegationIn.roles)
   return {
@@ -117,6 +124,10 @@ function normalizePolicy(raw, fallbackPreset) {
     },
     approval: pick(APPROVAL_IDS, value.approval, base.approval),
     mcp: pick(MCP_IDS, value.mcp, base.mcp),
+    servers: {
+      allow: Array.isArray(serversIn.allow) ? asStringList(serversIn.allow) : (base.servers && base.servers.allow || []).slice(),
+      deny: Array.isArray(serversIn.deny) ? asStringList(serversIn.deny) : (base.servers && base.servers.deny || []).slice(),
+    },
     skills: {
       deny: asStringList(value.skills && value.skills.deny),
     },
@@ -181,6 +192,7 @@ function intersectPolicies(...layers) {
       shell: tighter(SHELL_RANK, acc.shell, row.shell),
       approval: tighter(APPROVAL_RANK, acc.approval, row.approval),
       mcp: tighter(MCP_RANK, acc.mcp, row.mcp),
+      servers: intersectMcpServers(acc, row, tighter(MCP_RANK, acc.mcp, row.mcp)),
       tools: {
         allow,
         deny: TOOL_IDS.filter((id) => allow.indexOf(id) < 0),
@@ -324,6 +336,60 @@ function workspaceAccessOf(policy, cls) {
   return 'none'
 }
 
+function mcpServerOf(name) {
+  const id = String(name || '')
+  if (!id.startsWith('mcp__')) return ''
+  const rest = id.slice(5)
+  const cut = rest.indexOf('__')
+  if (cut <= 0) return ''
+  return rest.slice(0, cut)
+}
+
+function isMcpTool(name) {
+  const id = String(name || '')
+  return id.startsWith('mcp__') || id.toLowerCase().includes('mcp')
+}
+
+function mcpServerAllowed(policy, serverName) {
+  const row = policy && typeof policy === 'object' ? policy : {}
+  const mcp = MCP_IDS.includes(row.mcp) ? row.mcp : 'init-defaults'
+  const servers = row.servers && typeof row.servers === 'object' ? row.servers : {}
+  const allow = asStringList(servers.allow)
+  const deny = asStringList(servers.deny)
+  const server = String(serverName || '').trim()
+  if (!server) return false
+  if (mcp === 'none') return false
+  if (deny.indexOf(server) >= 0) return false
+  if (mcp === 'explicit') return allow.indexOf(server) >= 0
+  if (allow.length === 0) return true
+  return allow.indexOf(server) >= 0
+}
+
+function mcpUniverse(policy) {
+  if (!policy || policy.mcp === 'none') return []
+  const allow = (policy.servers && policy.servers.allow) || []
+  const deny = (policy.servers && policy.servers.deny) || []
+  if (policy.mcp === 'explicit' && allow.length === 0) return []
+  if (allow.length === 0) return null
+  return allow.filter((name) => deny.indexOf(name) < 0)
+}
+
+function intersectMcpServers(acc, row, mcp) {
+  const deny = [...new Set([
+    ...((acc.servers && acc.servers.deny) || []),
+    ...((row.servers && row.servers.deny) || []),
+  ])]
+  if (mcp === 'none') return { allow: [], deny }
+  const left = mcpUniverse(acc)
+  const right = mcpUniverse(row)
+  let allow
+  if (left === null && right === null) allow = []
+  else if (left === null) allow = right.slice()
+  else if (right === null) allow = left.slice()
+  else allow = left.filter((name) => right.indexOf(name) >= 0)
+  return { allow, deny }
+}
+
 function classifyTool(name, args) {
   const id = String(name || '').toLowerCase()
   if (OPENCLAW_FS[id]) return OPENCLAW_FS[id]
@@ -333,7 +399,7 @@ function classifyTool(name, args) {
     if (cmd === 'create' || cmd === 'write') return 'write'
     return 'edit'
   }
-  if (id.includes('mcp')) return 'other'
+  if (isMcpTool(name)) return 'mcp'
   if (id.includes('subagent') || id.includes('delegate')) return 'other'
   return 'other'
 }
@@ -342,7 +408,11 @@ function allowTool(policy, name, args) {
   if (!policy) return false
   const id = String(name || '').toLowerCase()
   if (id === 'skill') return true
-  if (id.includes('mcp') && policy.mcp === 'none') return false
+  if (isMcpTool(name)) {
+    const server = mcpServerOf(name)
+    if (!server) return false
+    return mcpServerAllowed(policy, server)
+  }
   if ((id.includes('subagent') || id.includes('delegate')) && policy.delegation.maxDepth <= 0) {
     return false
   }
@@ -428,6 +498,8 @@ const COPY = {
     permMcpNone: '无',
     permMcpExplicit: '仅显式',
     permMcpInit: '初始化默认',
+    mcpAllow: '允许的服务',
+    mcpAllowHint: '逗号分隔，例如 github, web。留空则全关。',
     preset_research: '只读',
     preset_developer: '开发',
     preset_reviewer: '审阅',
@@ -580,6 +652,8 @@ const COPY = {
     permMcpNone: 'None',
     permMcpExplicit: 'Explicit only',
     permMcpInit: 'Init defaults',
+    mcpAllow: 'Allowed servers',
+    mcpAllowHint: 'Comma-separated, e.g. github, web. Empty means none.',
     preset_research: 'Read only',
     preset_developer: 'Developer',
     preset_reviewer: 'Reviewer',
@@ -2179,6 +2253,17 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
             explicit: t('permMcpExplicit'),
             'init-defaults': t('permMcpInit'),
           }), (id) => setPolicy(clampClawPolicy({ ...currentPolicy, mcp: id })))),
+          currentPolicy.mcp === 'explicit' ? permField(t('mcpAllow'), el('input', {
+            className: 'dar-perm-num',
+            value: ((currentPolicy.servers && currentPolicy.servers.allow) || []).join(', '),
+            placeholder: t('mcpAllowHint'),
+            onChange(e) {
+              setPolicy(clampClawPolicy({
+                ...currentPolicy,
+                servers: { ...(currentPolicy.servers || { deny: [] }), allow: String(e.target.value || '').split(/[,;\s]+/).map((item) => item.trim()).filter(Boolean) },
+              }))
+            },
+          })) : null,
           permField(t('delegation'), el('input', {
             className: 'dar-perm-num',
             type: 'number',

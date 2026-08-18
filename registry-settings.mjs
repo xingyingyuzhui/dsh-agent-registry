@@ -825,6 +825,17 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
             explicit: t('permMcpExplicit'),
             'init-defaults': t('permMcpInit'),
           }), (id) => setPolicy(clampClawPolicy({ ...currentPolicy, mcp: id })))),
+          currentPolicy.mcp === 'explicit' ? permField(t('mcpAllow'), el('input', {
+            className: 'dar-perm-num',
+            value: ((currentPolicy.servers && currentPolicy.servers.allow) || []).join(', '),
+            placeholder: t('mcpAllowHint'),
+            onChange(e) {
+              setPolicy(clampClawPolicy({
+                ...currentPolicy,
+                servers: { ...(currentPolicy.servers || { deny: [] }), allow: String(e.target.value || '').split(/[,;\s]+/).map((item) => item.trim()).filter(Boolean) },
+              }))
+            },
+          })) : null,
           permField(t('delegation'), el('input', {
             className: 'dar-perm-num',
             type: 'number',

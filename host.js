@@ -390,6 +390,7 @@ export function apply(ctx) {
         const seeded = updateAgentPolicy(bound.registry, bound.agent.agentId, normalizePolicy({
           preset: bound.agent.preset || 'research',
           mcp: defaults.mcp,
+          servers: defaults.servers,
         }))
         const agent = seeded.agent || bound.agent
         await saveRegistry(file, seeded.registry || bound.registry)
