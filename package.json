@@ -1,0 +1,48 @@
+{
+  "name": "dsh-agent-registry",
+  "version": "0.1.55",
+  "description": "Phase 0 workspace-agent registry for DeepSeek Harness: bind, explain, archive. Does not gate tools. 工作区 Agent 登记：绑定 / 解释 / 归档，不拦截工具。",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "agent", "workspace"],
+  "license": "MIT",
+  "type": "module",
+  "main": "./host.js",
+  "exports": {
+    ".": "./host.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "host.js",
+    "client.js",
+    "registry-presets.mjs",
+    "registry-store.mjs",
+    "registry-claw.mjs",
+    "registry-seeds.mjs",
+    "registry-logic.mjs",
+    "registry-i18n.mjs",
+    "registry-styles.mjs",
+    "registry-marks.mjs",
+    "assets/claw-mark.png",
+    "assets/claw-mark-open.png",
+    "registry-view.mjs",
+    "registry-settings.mjs",
+    "registry-sidebar.mjs",
+    "registry-preset-hide.mjs",
+    "registry-isolate.mjs",
+    "registry-runtime.mjs",
+    "registry-model.mjs",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "build:check": "node scripts/build-client.mjs --check",
+    "test": "npm run build:check && node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web" }
+  }
+}

@@ -1,0 +1,4 @@
+# dsh bundle layer: workspace ↔ agent registry (observe only).
+- insert:
+    - id: dsh-agent-registry
+      name: dsh-agent-registry
