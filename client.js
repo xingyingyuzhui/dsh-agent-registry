@@ -489,7 +489,7 @@ const COPY = {
     leaveBehindArchiveHint: '从官方工作区名单拿掉，会话日志和人设留在盘上。',
     leaveBehindTransferHint: '官方工作区里继续挂着这些会话，卸掉后会在「工作区」里看到。',
     leaveBehindDeleteHint: '从官方名单拿掉，并删除这些会话日志。人设文件还在。',
-    templateHint: '新建 Agent 套用这份模板。侧栏管理名不是它的自称。',
+    templateHint: '之后新建的 Agent 默认套用这份模板。不是某一个已有 Agent 的设置。侧栏管理名不是它的自称。',
     templatePreset: '常驻模板',
     templateMcp: 'MCP 默认',
     templateMcp_init_defaults: '名单空则放行',
@@ -659,7 +659,7 @@ const COPY = {
     leaveBehindArchiveHint: 'Drop them from the official workspace list. Session logs and identity files stay on disk.',
     leaveBehindTransferHint: 'Leave official workspace rows in place. After uninstall they appear under Workspaces.',
     leaveBehindDeleteHint: 'Drop official workspace rows and delete those session logs. Identity files stay.',
-    templateHint: 'New agents use this template. The sidebar label is not the agent\'s name.',
+    templateHint: 'New agents start from this template. It is not a setting of any existing agent. The sidebar label is not the agent\'s name.',
     templatePreset: 'Settled template',
     templateMcp: 'MCP default',
     templateMcp_init_defaults: 'Allow when list is empty',
@@ -1568,7 +1568,7 @@ function formatObserveFail(data, fallback) {
   return String(msg)
 }
 
-const TABS = ['overview', 'template', 'persona', 'memory', 'model', 'permissions', 'skills']
+const TABS = ['overview', 'persona', 'memory', 'model', 'permissions', 'skills']
 
 function dateStamp(now) {
   const stamp = now instanceof Date ? now : new Date()
@@ -1688,7 +1688,6 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
     const agent = current && current.agent
     const isMain = false
     const leaveBehind = (data && data.leaveBehind) || 'archive'
-    const template = (data && data.template) || { preset: 'research', mcp: 'init-defaults' }
 
     React.useEffect(() => {
       if (choices.length === 0) return
@@ -1704,13 +1703,6 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
         setBusy(false)
         setConfirm(false)
       })
-    }
-
-    function saveTemplate(patch) {
-      setBusy(true)
-      post('/dsh-agent-registry/template', { ...template, ...patch }).then(() => load()).catch((err) => {
-        toast(String(err.message || t('fail')))
-      }).finally(() => setBusy(false))
     }
 
     function saveLeaveBehind(mode) {
@@ -2541,46 +2533,12 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
       )
     }
 
-    function templatePanel() {
-      const presetSegs = el('div', { className: 'dar-segs' }, AGENT_PRESET_IDS.map((id) => el('button', {
-        key: id,
-        type: 'button',
-        className: 'dar-seg',
-        'data-on': template.preset === id ? 'true' : 'false',
-        disabled: busy,
-        onClick() { saveTemplate({ preset: id }) },
-      }, t('preset_' + id))))
-      const mcpSegs = el('div', { className: 'dar-segs' }, ['init-defaults', 'explicit', 'none'].map((id) => el('button', {
-        key: id,
-        type: 'button',
-        className: 'dar-seg',
-        'data-on': template.mcp === id ? 'true' : 'false',
-        disabled: busy,
-        onClick() { saveTemplate({ mcp: id }) },
-      }, t('templateMcp_' + id.replace(/-/g, '_')))))
-      return el('div', { className: 'dar-panel-body' },
-        el('p', { className: 'dar-note' }, t('templateHint')),
-        el('div', { className: 'dar-facts' },
-          el('div', { className: 'dar-fact' },
-            el('div', { className: 'dar-fact-k' }, t('templatePreset')),
-            presetSegs,
-          ),
-          el('div', { className: 'dar-fact' },
-            el('div', { className: 'dar-fact-k' }, t('templateMcp')),
-            mcpSegs,
-          ),
-        ),
-        el('p', { className: 'dar-note' }, t('templateHatch')),
-      )
-    }
-
-    const panel = tab === 'template' ? templatePanel()
-      : tab === 'persona' ? personaPanel()
-        : tab === 'memory' ? memoryPanel()
-          : tab === 'model' ? modelPanel()
-            : tab === 'permissions' ? permissionsPanel()
-              : tab === 'skills' ? skillsPanel()
-                : overviewPanel()
+    const panel = tab === 'persona' ? personaPanel()
+      : tab === 'memory' ? memoryPanel()
+        : tab === 'model' ? modelPanel()
+          : tab === 'permissions' ? permissionsPanel()
+            : tab === 'skills' ? skillsPanel()
+              : overviewPanel()
 
     return el('div', { className: 'dar-page' },
       el('h2', { className: 'dar-title' }, t('title')),
@@ -2622,7 +2580,7 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
           }, t('tab' + id.charAt(0).toUpperCase() + id.slice(1)))),
         ),
         el('div', { className: 'dar-card', role: 'tabpanel' },
-          !current && tab !== 'template'
+          !current
             ? el('p', { className: 'dar-empty' }, t('empty'))
             : panel,
         ),
@@ -2661,10 +2619,81 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
   }
 }
 
-function registerSettings(ctx, React, t, Page) {
+function createTemplatePage(React, t, post, toast, subscribeLocale) {
+  return function TemplatePage() {
+    const el = React.createElement
+    const [data, setData] = React.useState(null)
+    const [error, setError] = React.useState('')
+    const [busy, setBusy] = React.useState(false)
+
+    const load = React.useCallback(() => {
+      return post('/dsh-agent-registry/list', {}).then((next) => {
+        setData(next)
+        setError('')
+      }).catch((err) => {
+        setError(String(err.message || err))
+      })
+    }, [])
+
+    React.useEffect(() => { load() }, [load])
+    React.useEffect(() => subscribeLocale(() => {}), [subscribeLocale])
+
+    const template = (data && data.template) || { preset: 'research', mcp: 'init-defaults' }
+
+    function saveTemplate(patch) {
+      setBusy(true)
+      post('/dsh-agent-registry/template', { ...template, ...patch }).then(() => {
+        toast(t('saved'))
+        return load()
+      }).catch((err) => {
+        toast(String(err.message || t('fail')))
+      }).finally(() => setBusy(false))
+    }
+
+    const presetSegs = el('div', { className: 'dar-segs' }, AGENT_PRESET_IDS.map((id) => el('button', {
+      key: id,
+      type: 'button',
+      className: 'dar-seg',
+      'data-on': template.preset === id ? 'true' : 'false',
+      disabled: busy,
+      onClick() { saveTemplate({ preset: id }) },
+    }, t('preset_' + id))))
+    const mcpSegs = el('div', { className: 'dar-segs' }, ['init-defaults', 'explicit', 'none'].map((id) => el('button', {
+      key: id,
+      type: 'button',
+      className: 'dar-seg',
+      'data-on': template.mcp === id ? 'true' : 'false',
+      disabled: busy,
+      onClick() { saveTemplate({ mcp: id }) },
+    }, t('templateMcp_' + id.replace(/-/g, '_')))))
+
+    return el('div', { className: 'dar-page' },
+      el('h2', { className: 'dar-title' }, t('tabTemplate')),
+      error ? el('p', { className: 'dar-note' }, error) : null,
+      el('p', { className: 'dar-intro' }, t('templateHint')),
+      el('div', { className: 'dar-card' },
+        el('div', { className: 'dar-panel-body' },
+          el('div', { className: 'dar-facts' },
+            el('div', { className: 'dar-fact' },
+              el('div', { className: 'dar-fact-k' }, t('templatePreset')),
+              presetSegs,
+            ),
+            el('div', { className: 'dar-fact' },
+              el('div', { className: 'dar-fact-k' }, t('templateMcp')),
+              mcpSegs,
+            ),
+          ),
+          el('p', { className: 'dar-note' }, t('templateHatch')),
+        ),
+      ),
+    )
+  }
+}
+
+function registerSettings(ctx, React, t, Page, TemplatePage) {
   const slots = ctx.get('slots')
   if (slots == null || React == null) return function () {}
-  return slots.inject('settings.section', function () {
+  const stopAgent = slots.inject('settings.section', function () {
     return slots.register({
       name: 'settings.section',
       id: 'dsh-agent-registry',
@@ -2673,6 +2702,19 @@ function registerSettings(ctx, React, t, Page) {
       label() { return t('nav') },
     }, Page)
   })
+  const stopTemplate = slots.inject('settings.section', function () {
+    return slots.register({
+      name: 'settings.section',
+      id: 'dsh-agent-registry-template',
+      order: 20,
+      locale: NS,
+      label() { return t('tabTemplate') },
+    }, TemplatePage)
+  })
+  return function () {
+    if (typeof stopAgent === 'function') stopAgent()
+    if (typeof stopTemplate === 'function') stopTemplate()
+  }
 }
 
 const CLAW_ATTR = 'data-dar-claw-section'
@@ -4148,6 +4190,7 @@ function apply(ctx) {
         if (
           label !== '工作区 Agent' && label !== 'Workspace agents'
           && label !== 'claw区agent' && label !== 'Claw agents' && label !== 'Claw Agent'
+          && label !== 'Claw Agent模板' && label !== 'Claw agent template'
         ) continue
         const svg = buttons[i].querySelector('svg')
         if (svg == null || svg.getAttribute('data-dar-icon') === '1') continue
@@ -4159,7 +4202,8 @@ function apply(ctx) {
   let ReactDOM = null
   try { ReactDOM = require('react-dom') } catch { /* optional */ }
   const Page = createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM)
-  const stopSettings = registerSettings(ctx, React, t, Page)
+  const TemplatePage = createTemplatePage(React, t, post, toast, subscribeLocale)
+  const stopSettings = registerSettings(ctx, React, t, Page, TemplatePage)
 
   let projected = null
 

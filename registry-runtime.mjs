@@ -1,7 +1,7 @@
 import { COPY, interpolate, NS, tWith } from './registry-i18n.mjs'
 import { ATTR, CSS } from './registry-styles.mjs'
 import { agentForSession, boundPresetOf, clawHideKeys, clawHideNames, clawPresetIds, detectClawZone } from './registry-view.mjs'
-import { createSettingsPage, registerSettings } from './registry-settings.mjs'
+import { createSettingsPage, createTemplatePage, registerSettings } from './registry-settings.mjs'
 import { createSidebar } from './registry-sidebar.mjs'
 import {
   CLAW_SESSION_ATTR,
@@ -90,6 +90,7 @@ export function apply(ctx) {
         if (
           label !== '工作区 Agent' && label !== 'Workspace agents'
           && label !== 'claw区agent' && label !== 'Claw agents' && label !== 'Claw Agent'
+          && label !== 'Claw Agent模板' && label !== 'Claw agent template'
         ) continue
         const svg = buttons[i].querySelector('svg')
         if (svg == null || svg.getAttribute('data-dar-icon') === '1') continue
@@ -101,7 +102,8 @@ export function apply(ctx) {
   let ReactDOM = null
   try { ReactDOM = require('react-dom') } catch { /* optional */ }
   const Page = createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM)
-  const stopSettings = registerSettings(ctx, React, t, Page)
+  const TemplatePage = createTemplatePage(React, t, post, toast, subscribeLocale)
+  const stopSettings = registerSettings(ctx, React, t, Page, TemplatePage)
 
   let projected = null
 

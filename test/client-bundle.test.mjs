@@ -40,6 +40,7 @@ test('generated client keeps the factory contract', () => {
   assert.match(src, /POLICY_SCHEMA_VERSION/)
   assert.match(src, /tabPersona: '核心'/)
   assert.match(src, /tabTemplate: 'Claw Agent模板'/)
+  assert.match(src, /dsh-agent-registry-template/)
   assert.match(src, /tabMemory: '记忆'/)
   assert.match(src, /memWriteAsk: '需审批'/)
   assert.match(src, /memory\/' \+ today \+ '\.md/)
