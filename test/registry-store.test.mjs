@@ -47,7 +47,7 @@ import {
   sessionStamp,
   shouldHideOfficialGroup,
 } from '../registry-view.mjs'
-import { applyClawHeaderActions, applyClawSearchInput, applyOfficialSearchHide, applyZoneVisibility, CLAW_ACTIONS_ATTR, CLAW_ATTR, findHeaderActions, findOfficialSearchInput, officialRowFact, readOfficialSearchQuery, SEARCH_HIDE_ATTR, TREE_HIDE_ATTR, ZONE_HIDE_ATTR } from '../registry-sidebar.mjs'
+import { applyClawHeaderActions, applyClawSearchInput, applyOfficialSearchHide, applyZoneVisibility, CLAW_ACTIONS_ATTR, CLAW_ATTR, findHeaderActions, findOfficialSearchInput, hideOfficialClawGroups, officialRowFact, readOfficialSearchQuery, SEARCH_HIDE_ATTR, TREE_HIDE_ATTR, ZONE_HIDE_ATTR } from '../registry-sidebar.mjs'
 import {
   filterOfficialPresetRoster,
   isolateWorkspaceSnapshot,
@@ -678,6 +678,83 @@ test('officialRowFact keeps the nearest group, not an ancestor Claw workspace', 
   assert.equal(fact.workspaceId, 'w-official')
   assert.equal(fact.path, 'C:\\Users\\qin\\Projects\\app')
   assert.equal(fact.title, 'MyProject')
+})
+
+test('officialRowFact ignores ancestor workspaceId without a local group', () => {
+  const leaf = {
+    memoizedProps: { className: 'groupSection' },
+    return: {
+      memoizedProps: { workspaceId: 'w-claw', path: 'C:\\Users\\qin\\.dsh\\DSclaw\\bot1' },
+      return: null,
+    },
+  }
+  const el = {
+    querySelector() { return { textContent: 'MyProject' } },
+    getAttribute() { return '' },
+    __reactFiber$test: leaf,
+  }
+  const fact = officialRowFact(el)
+  assert.equal(fact.workspaceId, '')
+  assert.equal(fact.path, '')
+  assert.equal(fact.title, 'MyProject')
+})
+
+test('hideOfficialClawGroups keeps official folders and session rows', () => {
+  const keys = clawHideKeys({
+    agents: [{
+      title: 'bot1', workspaceId: 'w-claw',
+      canonicalRoot: 'C:\\Users\\qin\\.dsh\\DSclaw\\bot1',
+      sessionIds: ['session-claw'],
+    }],
+  })
+  const header = {
+    attrs: {},
+    getAttribute(name) { return this.attrs[name] },
+    setAttribute(name, value) { this.attrs[name] = value },
+    removeAttribute(name) { delete this.attrs[name] },
+    closest() { return null },
+    querySelector() { return { textContent: 'MyProject' } },
+    __reactFiber$test: {
+      memoizedProps: {
+        group: { label: 'MyProject', workspaceId: 'w-official', path: 'C:\\Users\\qin\\Projects\\app', cwd: 'C:\\Users\\qin\\Projects\\app' },
+      },
+      return: {
+        memoizedProps: { workspaceId: 'w-claw', path: 'C:\\Users\\qin\\.dsh\\DSclaw\\bot1' },
+        return: null,
+      },
+    },
+  }
+  const session = {
+    attrs: {},
+    getAttribute(name) { return this.attrs[name] },
+    setAttribute(name, value) { this.attrs[name] = value },
+    removeAttribute(name) { delete this.attrs[name] },
+    closest() { return null },
+    querySelector() { return { textContent: 'bot1 notes' } },
+    __reactFiber$test: {
+      memoizedProps: { node: { id: 'session-official', cwd: 'C:\\Users\\qin\\Projects\\app' } },
+      return: null,
+    },
+  }
+  const section = {
+    attrs: {},
+    hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name) },
+    getAttribute(name) { return this.attrs[name] },
+    setAttribute(name, value) { this.attrs[name] = value },
+    removeAttribute(name) { delete this.attrs[name] },
+    querySelector(sel) { return sel.indexOf('treeitem') >= 0 ? header : null },
+    querySelectorAll() { return [header, session] },
+  }
+  const tree = {
+    children: [section],
+    closest() { return null },
+    querySelectorAll(sel) { return sel === '[role="treeitem"]' ? [header, session] : [] },
+  }
+  hideOfficialClawGroups({
+    querySelectorAll(sel) { return sel === '[role="tree"]' ? [tree] : [] },
+  }, keys)
+  assert.equal(section.attrs['data-dar-claw-hide'], undefined)
+  assert.equal(session.attrs['data-dar-claw-hide'], undefined)
 })
 
 test('claw helpers hide bound workspaces and preset picker labels', () => {

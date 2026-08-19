@@ -1384,14 +1384,21 @@ function shouldHideOfficialGroup(title, clawTitlesOrKeys) {
   return false
 }
 
+function isClawSessionFact(fact, keys) {
+  if (fact == null || keys == null) return false
+  if (fact.sessionId && keys.sessionIds && keys.sessionIds.has(String(fact.sessionId))) return true
+  return isDsClawPath(fact.path || fact.cwd || '')
+}
+
 function isClawWorkspaceFact(fact, keys) {
   if (fact == null || keys == null) return false
-  if (fact.title && shouldHideOfficialGroup(fact.title, keys)) return true
+  const raw = fact.path || fact.cwd || ''
+  if (isDsClawPath(raw)) return true
   if (fact.workspaceId && keys.workspaceIds && keys.workspaceIds.has(String(fact.workspaceId))) return true
-  if (fact.path && pathSetHas(keys.paths, fact.path)) return true
-  if (fact.cwd && pathSetHas(keys.paths, fact.cwd)) return true
-  if (isDsClawPath(fact.path || fact.cwd || '')) return true
+  if (raw && pathSetHas(keys.paths, raw)) return true
+  if (raw) return false
   if (fact.sessionId && keys.sessionIds && keys.sessionIds.has(String(fact.sessionId))) return true
+  if (!fact.workspaceId && fact.title && shouldHideOfficialGroup(fact.title, keys)) return true
   return false
 }
 
@@ -3258,14 +3265,9 @@ function officialRowFact(el) {
         if (node.cwd && !fact.cwd) fact.cwd = String(node.cwd)
         if (node.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(node.workspaceId)
       }
-      if (!seenGroup) {
-        if (props.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(props.workspaceId)
-        if (props.path && !fact.path) fact.path = String(props.path)
-        if (props.cwd && !fact.cwd) fact.cwd = String(props.cwd)
-      }
       if (props.sessionId && !fact.sessionId) fact.sessionId = String(props.sessionId)
     }
-    if (seenGroup && (fact.sessionId || seenNode || hops > 12)) break
+    if (seenGroup || seenNode) break
     fiber = fiber.return
     hops += 1
   }
@@ -3296,7 +3298,9 @@ function hideOfficialClawGroups(doc, titlesOrKeys) {
     const tree = trees[t]
     for (let i = 0; i < tree.children.length; i++) {
       const section = tree.children[i]
-      const fact = officialRowFact(section)
+      if (!section || (typeof section.hasAttribute === 'function' && section.hasAttribute(CLAW_ATTR))) continue
+      const header = section.querySelector && section.querySelector(':scope > [role="treeitem"]')
+      const fact = officialRowFact(header || section)
       if (!fact.title) fact.title = officialGroupTitle(section)
       const hide = isClawWorkspaceFact(fact, keys)
       markHidden(section, hide)
@@ -3305,9 +3309,9 @@ function hideOfficialClawGroups(doc, titlesOrKeys) {
     const rows = tree.querySelectorAll('[role="treeitem"]')
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
-      if (row.closest('[' + HIDE_ATTR + '="1"]')) continue
+      if (typeof row.closest === 'function' && (row.closest('[' + HIDE_ATTR + '="1"]') || row.closest('[' + CLAW_ATTR + ']'))) continue
       const fact = officialRowFact(row)
-      const hide = isClawWorkspaceFact(fact, keys)
+      const hide = fact.sessionId ? isClawSessionFact(fact, keys) : isClawWorkspaceFact(fact, keys)
       markHidden(row, hide)
       if (hide) hidden += 1
     }

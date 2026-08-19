@@ -3,6 +3,7 @@ import {
   clawHideKeys,
   defaultZone,
   filterClawSearch,
+  isClawSessionFact,
   isClawWorkspaceFact,
   isOfficialSectionLabel,
   normalizeZone,
@@ -82,14 +83,9 @@ export function officialRowFact(el) {
         if (node.cwd && !fact.cwd) fact.cwd = String(node.cwd)
         if (node.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(node.workspaceId)
       }
-      if (!seenGroup) {
-        if (props.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(props.workspaceId)
-        if (props.path && !fact.path) fact.path = String(props.path)
-        if (props.cwd && !fact.cwd) fact.cwd = String(props.cwd)
-      }
       if (props.sessionId && !fact.sessionId) fact.sessionId = String(props.sessionId)
     }
-    if (seenGroup && (fact.sessionId || seenNode || hops > 12)) break
+    if (seenGroup || seenNode) break
     fiber = fiber.return
     hops += 1
   }
@@ -120,7 +116,9 @@ export function hideOfficialClawGroups(doc, titlesOrKeys) {
     const tree = trees[t]
     for (let i = 0; i < tree.children.length; i++) {
       const section = tree.children[i]
-      const fact = officialRowFact(section)
+      if (!section || (typeof section.hasAttribute === 'function' && section.hasAttribute(CLAW_ATTR))) continue
+      const header = section.querySelector && section.querySelector(':scope > [role="treeitem"]')
+      const fact = officialRowFact(header || section)
       if (!fact.title) fact.title = officialGroupTitle(section)
       const hide = isClawWorkspaceFact(fact, keys)
       markHidden(section, hide)
@@ -129,9 +127,9 @@ export function hideOfficialClawGroups(doc, titlesOrKeys) {
     const rows = tree.querySelectorAll('[role="treeitem"]')
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
-      if (row.closest('[' + HIDE_ATTR + '="1"]')) continue
+      if (typeof row.closest === 'function' && (row.closest('[' + HIDE_ATTR + '="1"]') || row.closest('[' + CLAW_ATTR + ']'))) continue
       const fact = officialRowFact(row)
-      const hide = isClawWorkspaceFact(fact, keys)
+      const hide = fact.sessionId ? isClawSessionFact(fact, keys) : isClawWorkspaceFact(fact, keys)
       markHidden(row, hide)
       if (hide) hidden += 1
     }

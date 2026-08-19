@@ -85,14 +85,21 @@ export function shouldHideOfficialGroup(title, clawTitlesOrKeys) {
   return false
 }
 
+export function isClawSessionFact(fact, keys) {
+  if (fact == null || keys == null) return false
+  if (fact.sessionId && keys.sessionIds && keys.sessionIds.has(String(fact.sessionId))) return true
+  return isDsClawPath(fact.path || fact.cwd || '')
+}
+
 export function isClawWorkspaceFact(fact, keys) {
   if (fact == null || keys == null) return false
-  if (fact.title && shouldHideOfficialGroup(fact.title, keys)) return true
+  const raw = fact.path || fact.cwd || ''
+  if (isDsClawPath(raw)) return true
   if (fact.workspaceId && keys.workspaceIds && keys.workspaceIds.has(String(fact.workspaceId))) return true
-  if (fact.path && pathSetHas(keys.paths, fact.path)) return true
-  if (fact.cwd && pathSetHas(keys.paths, fact.cwd)) return true
-  if (isDsClawPath(fact.path || fact.cwd || '')) return true
+  if (raw && pathSetHas(keys.paths, raw)) return true
+  if (raw) return false
   if (fact.sessionId && keys.sessionIds && keys.sessionIds.has(String(fact.sessionId))) return true
+  if (!fact.workspaceId && fact.title && shouldHideOfficialGroup(fact.title, keys)) return true
   return false
 }
 
