@@ -21,6 +21,7 @@ import {
   isClawPresetId,
   presetIdForWorkspace,
   rewriteTemplatePresetYaml,
+  siblingFile,
   TEMPLATE_NAME,
 } from '../registry-presets.mjs'
 import { archiveAgent, explainAgent, listProjected, renameAgent, restoreAgent, sameRoot, syncBindings } from '../registry-logic.mjs'
@@ -86,6 +87,11 @@ test('rewriteTemplatePresetYaml replaces the name field', () => {
     rewriteTemplatePresetYaml('name: 工作区 Agent 模板\ndescription: x\n', TEMPLATE_NAME),
     'name: claw区agent模板\ndescription: x\n',
   )
+})
+
+test('siblingFile keeps the original slash style', () => {
+  assert.equal(siblingFile('/tmp/wa-template/agent.cordis.yml', 'preset.yml'), '/tmp/wa-template/preset.yml')
+  assert.equal(siblingFile('C:\\Users\\qin\\.dsh\\.agent-presets\\wa-template\\agent.cordis.yml', 'preset.yml'), 'C:\\Users\\qin\\.dsh\\.agent-presets\\wa-template\\preset.yml')
 })
 
 test('ensureTemplateNamed rewrites an old template display name', async () => {
@@ -357,6 +363,9 @@ test('claw slugs and legacy purge', () => {
   assert.equal(slugFromName('小黄', ['claw']), 'claw-2')
   assert.equal(isClawHomePath('/Users/qin/.dsh', '/Users/qin/.dsh/DSclaw/demo'), true)
   assert.equal(isClawHomePath('/Users/qin/.dsh', '/Users/qin/DSH'), false)
+  const home = join(tmpdir(), 'dar-home-win')
+  assert.equal(isClawHomePath(home, join(home, 'DSclaw', 'x')), true)
+  assert.equal(isClawHomePath(home, join(home, 'Desktop')), false)
   const registry = bindCreatedAgent(emptyRegistry(), {
     workspaceId: 'old',
     slug: '',

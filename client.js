@@ -1045,6 +1045,14 @@ function rewriteTemplatePresetYaml(text, name) {
   return line + '\n' + text
 }
 
+function siblingFile(path, name) {
+  const raw = String(path || '')
+  const dir = raw.replace(/[/\\][^/\\]+$/, '')
+  if (!dir || dir === raw) return String(name || '')
+  const sep = raw.includes('\\') ? '\\' : '/'
+  return dir + sep + String(name || '')
+}
+
 async function ensureTemplateNamed(presets, io) {
   const list = await presets.list()
   const template = list.find((row) => row && row.id === TEMPLATE_ID)
@@ -1053,7 +1061,7 @@ async function ensureTemplateNamed(presets, io) {
   if (template.path == null || io == null || typeof io.readFile !== 'function') {
     return { changed: false }
   }
-  const file = String(template.path).replace(/[/\\][^/\\]+$/, '') + '/preset.yml'
+  const file = siblingFile(template.path, 'preset.yml')
   const text = await io.readFile(file, 'utf8')
   const next = rewriteTemplatePresetYaml(text, TEMPLATE_NAME)
   if (next === text) return { changed: false }
