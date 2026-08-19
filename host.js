@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defaultDshHome, loadRegistry, loadRegistrySync, registryFile, saveRegistry } from './registry-store.mjs'
-import { defaultsFile, loadDefaultsSync } from '../dsh-agent-policy/policy-store.mjs'
+import { defaultsFile, loadDefaultsSync, saveDefaults } from '../dsh-agent-policy/policy-store.mjs'
 import { clearClawDefault, normalizePolicy } from './registry-presets.mjs'
 import { archiveAgent, explainAgent, identityPaths, listProjected, renameAgent, restoreAgent, syncBindings, updateAgentModel, updateAgentPolicy, updateAgentSkills } from './registry-logic.mjs'
 import {
@@ -224,6 +224,7 @@ export function apply(ctx) {
           home: dshHome,
           clawHome: clawHome(dshHome),
           leaveBehind: registry.settings && registry.settings.leaveBehind,
+          template: loadDefaultsSync(defaultsFile(dshHome)),
           ...projected,
         })
       }),
@@ -346,7 +347,7 @@ export function apply(ctx) {
         })
         const defaults = loadDefaultsSync(defaultsFile(dshHome))
         const seeded = updateAgentPolicy(bound.registry, bound.agent.agentId, normalizePolicy({
-          preset: bound.agent.preset || 'research',
+          preset: defaults.preset || bound.agent.preset || 'research',
           mcp: defaults.mcp,
           servers: defaults.servers,
         }))
@@ -506,6 +507,21 @@ export function apply(ctx) {
         const registry = await saveRegistry(file, setLeaveBehind(loaded, body && body.leaveBehind))
         try { writeLeavePlan(dshHome, registry, listWorkspaces(ctx)) } catch { /* plan is best-effort */ }
         writeJson(res, 200, { ok: true, leaveBehind: registry.settings.leaveBehind })
+      }),
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/dsh-agent-registry/template',
+      handler: handle(async (_req, res, body) => {
+        const file = defaultsFile(dshHome)
+        const loaded = loadDefaultsSync(file)
+        const template = await saveDefaults(file, {
+          ...loaded,
+          preset: body && body.preset,
+          mcp: body && body.mcp != null ? body.mcp : loaded.mcp,
+          servers: body && body.servers ? body.servers : loaded.servers,
+        })
+        writeJson(res, 200, { ok: true, template })
       }),
     }),
     ctx.webServer.register({

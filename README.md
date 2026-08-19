@@ -36,6 +36,7 @@ dsh plugin --profile web add link:/abs/path/to/dsh-agent-registry
 - 新绑定默认套用 **research** 只读声明，`enforced: false`
 - 删除 = 归档绑定，不删项目目录、不删会话日志
 - 绑定写在 `~/.dsh/workspace-agents/registry.json`
+- 设置 → Claw Agent → **Claw Agent模板** 管新建默认（常驻模板 + MCP）。`BOOTSTRAP.md` 还在时仍可问名字并写人设文件
 - 设置 → Claw Agent → 概览可选择卸掉本插件后：归档（默认）/ 转到官方工作区 / 删掉会话日志。卸载时按这个处理官方名单，避免 Claw 会话全挤进「工作区」。
 
 卸掉本插件后，DSH 原来的权限预设照旧，不会变成全开。真正按策略拒绝，要等套件里的 `dsh-agent-gate`。

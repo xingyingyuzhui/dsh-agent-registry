@@ -41,7 +41,7 @@ test('apply registers POST routes and disposes them', async () => {
     },
   }
   apply(ctx)
-  assert.equal(routes.length, 12)
+  assert.equal(routes.length, 13)
   assert.ok(routes.every((row) => row.kind === 'exact'))
   assert.deepEqual(routes.map((row) => row.path), [
     '/dsh-agent-registry/list',
@@ -55,10 +55,11 @@ test('apply registers POST routes and disposes them', async () => {
     '/dsh-agent-registry/models',
     '/dsh-agent-registry/model',
     '/dsh-agent-registry/leave-behind',
+    '/dsh-agent-registry/template',
     '/dsh-agent-registry/restore',
   ])
   ctx._stop()
-  assert.equal(disposed.length, 12)
+  assert.equal(disposed.length, 13)
 })
 
 test('list handler does not bind ordinary workspaces', async () => {

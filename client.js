@@ -425,6 +425,7 @@ function classifyTool(name, args) {
     return 'edit'
   }
   if (isMcpTool(name)) return 'mcp'
+  if (id === 'ask_user_question' || id === 'ask_user' || id === 'user_question') return 'ask_user'
   if (id.includes('subagent') || id.includes('delegate')) return 'other'
   return 'other'
 }
@@ -433,6 +434,7 @@ function allowTool(policy, name, args) {
   if (!policy) return false
   const id = String(name || '').toLowerCase()
   if (id === 'skill') return true
+  if (id === 'ask_user_question' || id === 'ask_user' || id === 'user_question') return true
   if (isMcpTool(name)) {
     const server = mcpServerOf(name)
     if (!server) return false
@@ -448,6 +450,7 @@ function allowTool(policy, name, args) {
     return (policy.delegation && policy.delegation.maxDepth || 0) > 0
   }
   const cls = classifyTool(name, args)
+  if (cls === 'ask_user') return true
   if (cls === 'other') return false
   if (cls === 'edit' || cls === 'write' || cls === 'apply_patch') {
     if (cls === 'apply_patch') return isToolEnabled(policy, 'apply_patch') || isToolEnabled(policy, 'edit')
@@ -471,6 +474,7 @@ const COPY = {
     refresh: '刷新',
     tabs: 'Agent 配置',
     tabOverview: '概览',
+    tabTemplate: 'Claw Agent模板',
     tabPersona: '核心',
     tabMemory: '记忆',
     tabModel: '模型',
@@ -485,6 +489,13 @@ const COPY = {
     leaveBehindArchiveHint: '从官方工作区名单拿掉，会话日志和人设留在盘上。',
     leaveBehindTransferHint: '官方工作区里继续挂着这些会话，卸掉后会在「工作区」里看到。',
     leaveBehindDeleteHint: '从官方名单拿掉，并删除这些会话日志。人设文件还在。',
+    templateHint: '新建 Agent 套用这份模板。侧栏管理名不是它的自称。',
+    templatePreset: '常驻模板',
+    templateMcp: 'MCP 默认',
+    templateMcp_init_defaults: '名单空则放行',
+    templateMcp_explicit: '只放行名单',
+    templateMcp_none: '全关',
+    templateHatch: 'BOOTSTRAP.md 还在时，只额外放行：问你怎么称呼、写 IDENTITY / USER / SOUL、删掉 BOOTSTRAP。终端和出站不放宽。仪式结束后按常驻模板收权。',
     personaHint: 'SOUL / IDENTITY / AGENTS / TOOLS 进提示词。USER / MEMORY / 日记开场注入（有长度上限）。新建时还有 BOOTSTRAP.md，问完名字就删。HEARTBEAT 巡检默认关。',
     memWrite: '写入',
     memWriteFree: '自由写',
@@ -633,6 +644,7 @@ const COPY = {
     refresh: 'Refresh',
     tabs: 'Agent configuration',
     tabOverview: 'Overview',
+    tabTemplate: 'Claw agent template',
     tabPersona: 'Core',
     tabMemory: 'Memory',
     tabModel: 'Model',
@@ -647,6 +659,13 @@ const COPY = {
     leaveBehindArchiveHint: 'Drop them from the official workspace list. Session logs and identity files stay on disk.',
     leaveBehindTransferHint: 'Leave official workspace rows in place. After uninstall they appear under Workspaces.',
     leaveBehindDeleteHint: 'Drop official workspace rows and delete those session logs. Identity files stay.',
+    templateHint: 'New agents use this template. The sidebar label is not the agent\'s name.',
+    templatePreset: 'Settled template',
+    templateMcp: 'MCP default',
+    templateMcp_init_defaults: 'Allow when list is empty',
+    templateMcp_explicit: 'Allow-list only',
+    templateMcp_none: 'Off',
+    templateHatch: 'While BOOTSTRAP.md remains, also allow asking what to be called, writing IDENTITY / USER / SOUL, and deleting BOOTSTRAP. Shell and outbound stay closed. After the ritual, the settled template applies.',
     personaHint: 'SOUL / IDENTITY / AGENTS / TOOLS go into the prompt. USER / MEMORY / daily notes are injected at session start (capped). New agents also get BOOTSTRAP.md; delete it after the name ritual. HEARTBEAT patrol stays off.',
     memWrite: 'Writes',
     memWriteFree: 'Free',
@@ -1549,7 +1568,7 @@ function formatObserveFail(data, fallback) {
   return String(msg)
 }
 
-const TABS = ['overview', 'persona', 'memory', 'model', 'permissions', 'skills']
+const TABS = ['overview', 'template', 'persona', 'memory', 'model', 'permissions', 'skills']
 
 function dateStamp(now) {
   const stamp = now instanceof Date ? now : new Date()
@@ -1669,6 +1688,7 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
     const agent = current && current.agent
     const isMain = false
     const leaveBehind = (data && data.leaveBehind) || 'archive'
+    const template = (data && data.template) || { preset: 'research', mcp: 'init-defaults' }
 
     React.useEffect(() => {
       if (choices.length === 0) return
@@ -1684,6 +1704,13 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
         setBusy(false)
         setConfirm(false)
       })
+    }
+
+    function saveTemplate(patch) {
+      setBusy(true)
+      post('/dsh-agent-registry/template', { ...template, ...patch }).then(() => load()).catch((err) => {
+        toast(String(err.message || t('fail')))
+      }).finally(() => setBusy(false))
     }
 
     function saveLeaveBehind(mode) {
@@ -2514,12 +2541,46 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
       )
     }
 
-    const panel = tab === 'persona' ? personaPanel()
-      : tab === 'memory' ? memoryPanel()
-        : tab === 'model' ? modelPanel()
-          : tab === 'permissions' ? permissionsPanel()
-            : tab === 'skills' ? skillsPanel()
-              : overviewPanel()
+    function templatePanel() {
+      const presetSegs = el('div', { className: 'dar-segs' }, AGENT_PRESET_IDS.map((id) => el('button', {
+        key: id,
+        type: 'button',
+        className: 'dar-seg',
+        'data-on': template.preset === id ? 'true' : 'false',
+        disabled: busy,
+        onClick() { saveTemplate({ preset: id }) },
+      }, t('preset_' + id))))
+      const mcpSegs = el('div', { className: 'dar-segs' }, ['init-defaults', 'explicit', 'none'].map((id) => el('button', {
+        key: id,
+        type: 'button',
+        className: 'dar-seg',
+        'data-on': template.mcp === id ? 'true' : 'false',
+        disabled: busy,
+        onClick() { saveTemplate({ mcp: id }) },
+      }, t('templateMcp_' + id.replace(/-/g, '_')))))
+      return el('div', { className: 'dar-panel-body' },
+        el('p', { className: 'dar-note' }, t('templateHint')),
+        el('div', { className: 'dar-facts' },
+          el('div', { className: 'dar-fact' },
+            el('div', { className: 'dar-fact-k' }, t('templatePreset')),
+            presetSegs,
+          ),
+          el('div', { className: 'dar-fact' },
+            el('div', { className: 'dar-fact-k' }, t('templateMcp')),
+            mcpSegs,
+          ),
+        ),
+        el('p', { className: 'dar-note' }, t('templateHatch')),
+      )
+    }
+
+    const panel = tab === 'template' ? templatePanel()
+      : tab === 'persona' ? personaPanel()
+        : tab === 'memory' ? memoryPanel()
+          : tab === 'model' ? modelPanel()
+            : tab === 'permissions' ? permissionsPanel()
+              : tab === 'skills' ? skillsPanel()
+                : overviewPanel()
 
     return el('div', { className: 'dar-page' },
       el('h2', { className: 'dar-title' }, t('title')),
@@ -2548,22 +2609,24 @@ function createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM) {
             : null,
         ),
       ),
-      choices.length === 0
-        ? el('p', { className: 'dar-empty' }, t('empty'))
-        : el(React.Fragment, null,
-          el('div', { className: 'dar-tabs', role: 'tablist', 'aria-label': t('tabs') },
-            TABS.map((id) => el('button', {
-              key: id,
-              type: 'button',
-              role: 'tab',
-              className: 'dar-tab',
-              'aria-selected': tab === id ? 'true' : 'false',
-              'data-active': tab === id ? 'true' : undefined,
-              onClick() { setTab(id) },
-            }, t('tab' + id.charAt(0).toUpperCase() + id.slice(1)))),
-          ),
-          el('div', { className: 'dar-card', role: 'tabpanel' }, panel),
+      el(React.Fragment, null,
+        el('div', { className: 'dar-tabs', role: 'tablist', 'aria-label': t('tabs') },
+          TABS.map((id) => el('button', {
+            key: id,
+            type: 'button',
+            role: 'tab',
+            className: 'dar-tab',
+            'aria-selected': tab === id ? 'true' : 'false',
+            'data-active': tab === id ? 'true' : undefined,
+            onClick() { setTab(id) },
+          }, t('tab' + id.charAt(0).toUpperCase() + id.slice(1)))),
         ),
+        el('div', { className: 'dar-card', role: 'tabpanel' },
+          !current && tab !== 'template'
+            ? el('p', { className: 'dar-empty' }, t('empty'))
+            : panel,
+        ),
+      ),
       confirm ? el('div', { className: 'dar-overlay', onClick() { setConfirm(false) } },
         el('div', { className: 'dar-dialog', onClick(e) { e.stopPropagation() } },
           el('div', { className: 'dar-dialog-head' }, t('archiveTitle')),

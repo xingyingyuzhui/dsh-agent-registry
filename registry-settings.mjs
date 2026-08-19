@@ -14,7 +14,7 @@ import {
 } from './registry-presets.mjs'
 import { CLIENT_CODES, formatObserveFail, newTraceId } from './registry-observe.mjs'
 
-const TABS = ['overview', 'persona', 'memory', 'model', 'permissions', 'skills']
+const TABS = ['overview', 'template', 'persona', 'memory', 'model', 'permissions', 'skills']
 
 function dateStamp(now) {
   const stamp = now instanceof Date ? now : new Date()
@@ -134,6 +134,7 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
     const agent = current && current.agent
     const isMain = false
     const leaveBehind = (data && data.leaveBehind) || 'archive'
+    const template = (data && data.template) || { preset: 'research', mcp: 'init-defaults' }
 
     React.useEffect(() => {
       if (choices.length === 0) return
@@ -149,6 +150,13 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
         setBusy(false)
         setConfirm(false)
       })
+    }
+
+    function saveTemplate(patch) {
+      setBusy(true)
+      post('/dsh-agent-registry/template', { ...template, ...patch }).then(() => load()).catch((err) => {
+        toast(String(err.message || t('fail')))
+      }).finally(() => setBusy(false))
     }
 
     function saveLeaveBehind(mode) {
@@ -979,12 +987,46 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
       )
     }
 
-    const panel = tab === 'persona' ? personaPanel()
-      : tab === 'memory' ? memoryPanel()
-        : tab === 'model' ? modelPanel()
-          : tab === 'permissions' ? permissionsPanel()
-            : tab === 'skills' ? skillsPanel()
-              : overviewPanel()
+    function templatePanel() {
+      const presetSegs = el('div', { className: 'dar-segs' }, AGENT_PRESET_IDS.map((id) => el('button', {
+        key: id,
+        type: 'button',
+        className: 'dar-seg',
+        'data-on': template.preset === id ? 'true' : 'false',
+        disabled: busy,
+        onClick() { saveTemplate({ preset: id }) },
+      }, t('preset_' + id))))
+      const mcpSegs = el('div', { className: 'dar-segs' }, ['init-defaults', 'explicit', 'none'].map((id) => el('button', {
+        key: id,
+        type: 'button',
+        className: 'dar-seg',
+        'data-on': template.mcp === id ? 'true' : 'false',
+        disabled: busy,
+        onClick() { saveTemplate({ mcp: id }) },
+      }, t('templateMcp_' + id.replace(/-/g, '_')))))
+      return el('div', { className: 'dar-panel-body' },
+        el('p', { className: 'dar-note' }, t('templateHint')),
+        el('div', { className: 'dar-facts' },
+          el('div', { className: 'dar-fact' },
+            el('div', { className: 'dar-fact-k' }, t('templatePreset')),
+            presetSegs,
+          ),
+          el('div', { className: 'dar-fact' },
+            el('div', { className: 'dar-fact-k' }, t('templateMcp')),
+            mcpSegs,
+          ),
+        ),
+        el('p', { className: 'dar-note' }, t('templateHatch')),
+      )
+    }
+
+    const panel = tab === 'template' ? templatePanel()
+      : tab === 'persona' ? personaPanel()
+        : tab === 'memory' ? memoryPanel()
+          : tab === 'model' ? modelPanel()
+            : tab === 'permissions' ? permissionsPanel()
+              : tab === 'skills' ? skillsPanel()
+                : overviewPanel()
 
     return el('div', { className: 'dar-page' },
       el('h2', { className: 'dar-title' }, t('title')),
@@ -1013,22 +1055,24 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
             : null,
         ),
       ),
-      choices.length === 0
-        ? el('p', { className: 'dar-empty' }, t('empty'))
-        : el(React.Fragment, null,
-          el('div', { className: 'dar-tabs', role: 'tablist', 'aria-label': t('tabs') },
-            TABS.map((id) => el('button', {
-              key: id,
-              type: 'button',
-              role: 'tab',
-              className: 'dar-tab',
-              'aria-selected': tab === id ? 'true' : 'false',
-              'data-active': tab === id ? 'true' : undefined,
-              onClick() { setTab(id) },
-            }, t('tab' + id.charAt(0).toUpperCase() + id.slice(1)))),
-          ),
-          el('div', { className: 'dar-card', role: 'tabpanel' }, panel),
+      el(React.Fragment, null,
+        el('div', { className: 'dar-tabs', role: 'tablist', 'aria-label': t('tabs') },
+          TABS.map((id) => el('button', {
+            key: id,
+            type: 'button',
+            role: 'tab',
+            className: 'dar-tab',
+            'aria-selected': tab === id ? 'true' : 'false',
+            'data-active': tab === id ? 'true' : undefined,
+            onClick() { setTab(id) },
+          }, t('tab' + id.charAt(0).toUpperCase() + id.slice(1)))),
         ),
+        el('div', { className: 'dar-card', role: 'tabpanel' },
+          !current && tab !== 'template'
+            ? el('p', { className: 'dar-empty' }, t('empty'))
+            : panel,
+        ),
+      ),
       confirm ? el('div', { className: 'dar-overlay', onClick() { setConfirm(false) } },
         el('div', { className: 'dar-dialog', onClick(e) { e.stopPropagation() } },
           el('div', { className: 'dar-dialog-head' }, t('archiveTitle')),
