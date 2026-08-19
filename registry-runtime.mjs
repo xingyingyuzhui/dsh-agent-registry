@@ -1,7 +1,8 @@
 import { COPY, interpolate, NS, tWith } from './registry-i18n.mjs'
 import { ATTR, CSS } from './registry-styles.mjs'
 import { agentForSession, boundPresetOf, clawHideKeys, clawHideNames, clawPresetIds, detectClawZone } from './registry-view.mjs'
-import { createSettingsPage, createTemplatePage, registerSettings } from './registry-settings.mjs'
+import { createSettingsPage, registerSettings } from './registry-settings.mjs'
+import { createTemplatePage } from './registry-template.mjs'
 import { createSidebar } from './registry-sidebar.mjs'
 import {
   CLAW_SESSION_ATTR,
@@ -102,7 +103,7 @@ export function apply(ctx) {
   let ReactDOM = null
   try { ReactDOM = require('react-dom') } catch { /* optional */ }
   const Page = createSettingsPage(React, t, post, toast, subscribeLocale, ReactDOM)
-  const TemplatePage = createTemplatePage(React, t, post, toast, subscribeLocale)
+  const TemplatePage = createTemplatePage(React, t, post, toast, subscribeLocale, ReactDOM)
   const stopSettings = registerSettings(ctx, React, t, Page, TemplatePage)
 
   let projected = null

@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-registry",
-  "version": "0.1.73",
+  "version": "0.1.74",
   "description": "Phase 0 workspace-agent registry for DeepSeek Harness: bind, explain, archive. Does not gate tools. 工作区 Agent 登记：绑定 / 解释 / 归档，不拦截工具。",
   "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "agent", "workspace"],
   "license": "MIT",
@@ -27,6 +27,7 @@
     "registry-view.mjs",
     "registry-observe.mjs",
     "registry-settings.mjs",
+    "registry-template.mjs",
     "registry-sidebar.mjs",
     "registry-preset-hide.mjs",
     "registry-isolate.mjs",

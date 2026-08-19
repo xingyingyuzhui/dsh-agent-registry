@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defaultDshHome, loadRegistry, loadRegistrySync, registryFile, saveRegistry } from './registry-store.mjs'
-import { defaultsFile, loadDefaultsSync, saveDefaults } from '../dsh-agent-policy/policy-store.mjs'
+import { defaultsFile, loadDefaultsSync, readTemplateSeedsSync, saveDefaults, writeTemplateSeed } from '../dsh-agent-policy/policy-store.mjs'
 import { clearClawDefault, normalizePolicy } from './registry-presets.mjs'
 import { archiveAgent, explainAgent, identityPaths, listProjected, renameAgent, restoreAgent, syncBindings, updateAgentModel, updateAgentPolicy, updateAgentSkills } from './registry-logic.mjs'
 import {
@@ -224,7 +224,11 @@ export function apply(ctx) {
           home: dshHome,
           clawHome: clawHome(dshHome),
           leaveBehind: registry.settings && registry.settings.leaveBehind,
-          template: loadDefaultsSync(defaultsFile(dshHome)),
+          template: {
+            ...loadDefaultsSync(defaultsFile(dshHome)),
+            seeds: readTemplateSeedsSync(dshHome),
+            stockSeeds: seedFiles(''),
+          },
           ...projected,
         })
       }),
@@ -323,7 +327,7 @@ export function apply(ctx) {
           writeJson(res, 409, { ok: false, error: error && error.message ? error.message : 'workspace exists', code: CODES.REGISTRY_WORKSPACE_EXISTS })
           return
         }
-        const files = seedFiles(title)
+        const files = { ...seedFiles(title), ...readTemplateSeedsSync(dshHome) }
         await mkdir(join(path, 'memory'), { recursive: true })
         for (const [name, text] of Object.entries(files)) {
           await writeFile(join(path, name), text)
@@ -346,12 +350,23 @@ export function apply(ctx) {
           dshPreset,
         })
         const defaults = loadDefaultsSync(defaultsFile(dshHome))
-        const seeded = updateAgentPolicy(bound.registry, bound.agent.agentId, normalizePolicy({
+        const seeded = updateAgentPolicy(bound.registry, bound.agent.agentId, normalizePolicy(defaults.policy || {
           preset: defaults.preset || bound.agent.preset || 'research',
           mcp: defaults.mcp,
           servers: defaults.servers,
         }))
-        const agent = seeded.agent || bound.agent
+        let registryOut = seeded.registry || bound.registry
+        let agent = seeded.agent || bound.agent
+        if (defaults.model) {
+          const modeled = updateAgentModel(registryOut, agent.agentId, defaults.model)
+          registryOut = modeled.registry
+          agent = modeled.agent || agent
+        }
+        if (defaults.skills && defaults.skills.deny && defaults.skills.deny.length) {
+          const skilled = updateAgentSkills(registryOut, agent.agentId, defaults.skills.deny)
+          registryOut = skilled.registry
+          agent = skilled.agent || agent
+        }
         op.stage('policy_write')
         try {
           if (agent.canonicalRoot && isClawHomePath(dshHome, agent.canonicalRoot) && agent.policy) {
@@ -368,7 +383,7 @@ export function apply(ctx) {
         }
         op.stage('save_registry')
         try {
-          await saveRegistry(file, seeded.registry || bound.registry)
+          await saveRegistry(file, registryOut)
         } catch (error) {
           op.fail(CODES.REGISTRY_SAVE_FAILED, error, {
             state: 'partially_applied',
@@ -515,13 +530,27 @@ export function apply(ctx) {
       handler: handle(async (_req, res, body) => {
         const file = defaultsFile(dshHome)
         const loaded = loadDefaultsSync(file)
+        const seed = body && body.seed
+        if (seed && typeof seed.file === 'string') {
+          await writeTemplateSeed(dshHome, seed.file, seed.content)
+        }
         const template = await saveDefaults(file, {
           ...loaded,
-          preset: body && body.preset,
+          preset: body && body.preset != null ? body.preset : loaded.preset,
           mcp: body && body.mcp != null ? body.mcp : loaded.mcp,
           servers: body && body.servers ? body.servers : loaded.servers,
+          policy: body && body.policy ? body.policy : loaded.policy,
+          model: body && body.inheritModel === true ? null : (body && body.model !== undefined ? body.model : loaded.model),
+          skills: body && body.skills ? body.skills : loaded.skills,
         })
-        writeJson(res, 200, { ok: true, template })
+        writeJson(res, 200, {
+          ok: true,
+          template: {
+            ...template,
+            seeds: readTemplateSeedsSync(dshHome),
+            stockSeeds: seedFiles(''),
+          },
+        })
       }),
     }),
     ctx.webServer.register({
