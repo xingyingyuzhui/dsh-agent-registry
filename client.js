@@ -1186,7 +1186,7 @@ function findClawAgent(registry, query) {
   const preset = query && query.preset ? String(query.preset) : ''
   for (const row of rows) {
     if (!row || row.status === 'archived') continue
-    if (cwd && row.canonicalRoot === cwd) return row
+    if (cwd && row.canonicalRoot && normalizePathKey(row.canonicalRoot) === normalizePathKey(cwd)) return row
   }
   if (preset && isClawPresetId(preset)) {
     for (const row of rows) {
@@ -1405,10 +1405,11 @@ function isClawWorkspaceFact(fact, keys) {
 function menuLabelStartsWithName(label, name) {
   if (!label || !name) return false
   if (label === name) return true
-  if (label.indexOf(name + ' ·') === 0) return true
+  if (label.indexOf(name + ' ·') === 0 || label.indexOf(name + ' ') === 0) return true
   if (label.indexOf(name) !== 0) return false
   const next = label.charAt(name.length)
-  return next === ' ' || next === '·' || !/[A-Za-z0-9_-]/.test(next)
+  if (/[A-Za-z0-9_-]/.test(next)) return false
+  return label.length >= name.length + 12
 }
 
 function isClawPresetMenuLabel(text, names) {
@@ -1478,8 +1479,9 @@ function agentForSession(projected, sessionId, session) {
   }
   const cwd = session && (session.cwd || session.path)
   if (cwd) {
+    const key = normalizePathKey(cwd)
     for (let i = 0; i < agents.length; i++) {
-      if (agents[i].canonicalRoot && agents[i].canonicalRoot === cwd) return agents[i]
+      if (agents[i].canonicalRoot && normalizePathKey(agents[i].canonicalRoot) === key) return agents[i]
     }
   }
   return null
@@ -4207,6 +4209,22 @@ const SEAT_HINTS = [
 
 const PRESET_HIDE_ATTR = 'data-dar-claw-preset'
 
+function nearestPresetCard(code) {
+  if (!code || typeof code.closest !== 'function') return null
+  const li = code.closest('li')
+  if (li) return li
+  let node = code.parentElement
+  for (let i = 0; i < 5 && node; i++) {
+    const cls = String(node.className || '')
+    if (/(^|[^a-zA-Z])card([^a-zA-Z]|$)/i.test(cls)) {
+      const codes = typeof node.querySelectorAll === 'function' ? node.querySelectorAll('code') : []
+      if (codes.length <= 1) return node
+    }
+    node = node.parentElement
+  }
+  return null
+}
+
 function mark(el, hide) {
   if (el == null) return
   const current = el.getAttribute(PRESET_HIDE_ATTR) === '1'
@@ -4223,7 +4241,7 @@ function hideClawPresetSurfaces(doc, ids, names) {
     const code = codes[i]
     if (code.closest('.dar-page')) continue
     const id = String(code.textContent || '').trim()
-    const card = code.closest('li') || code.closest('[class*="card"]')
+    const card = nearestPresetCard(code)
     mark(card, idSet.has(id) || isClawPresetId(id))
   }
   const items = doc.querySelectorAll('[role="menuitem"]')
@@ -4233,7 +4251,10 @@ function hideClawPresetSurfaces(doc, ids, names) {
     const hide = isClawPresetMenuLabel(item.textContent, nameSet)
     mark(item, hide)
     const wrap = item.parentElement
-    if (wrap && wrap.getAttribute && wrap.getAttribute('role') !== 'menu') mark(wrap, hide)
+    if (wrap && wrap.getAttribute && wrap.getAttribute('role') !== 'menu') {
+      const kids = typeof wrap.querySelectorAll === 'function' ? wrap.querySelectorAll('[role="menuitem"]') : null
+      if (!kids || kids.length <= 1) mark(wrap, hide)
+    }
   }
   const options = doc.querySelectorAll('option')
   for (let i = 0; i < options.length; i++) {
@@ -4347,7 +4368,7 @@ function blockClawDefaultClick(event, ids, lockSeat, names) {
     event.stopPropagation()
     return true
   }
-  const card = target.closest('li') || target.closest('[class*="card"]')
+  const card = nearestPresetCard(target)
   if (card == null) return false
   const code = card.querySelector('code')
   const id = code == null ? '' : String(code.textContent || '').trim()

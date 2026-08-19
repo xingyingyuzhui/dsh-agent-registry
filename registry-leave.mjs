@@ -19,7 +19,8 @@ export function setLeaveBehind(registry, mode) {
 export function isClawOfficialWorkspace(workspace, registry) {
   if (!workspace) return false
   if (isDsClawPath(workspace.path || workspace.cwd || '')) return true
-  const id = workspace.id != null ? String(workspace.id) : ''
+  const id = workspace.id != null ? String(workspace.id)
+    : (workspace.workspaceId != null ? String(workspace.workspaceId) : '')
   if (!id || !registry || !registry.agents) return false
   return Object.values(registry.agents).some((agent) => agent && String(agent.workspaceId) === id)
 }
@@ -250,13 +251,17 @@ export async function ensureOfficialWorkspaces(ctx, registry) {
   const agents = next && next.agents ? Object.values(next.agents) : []
   for (const agent of agents) {
     if (!agent || !agent.canonicalRoot) continue
-    const exists = workspaces.some((row) => sameRoot(row.path, agent.canonicalRoot) || String(row.id) === String(agent.workspaceId))
+    const exists = workspaces.some((row) => {
+      const id = row && (row.id != null ? row.id : row.workspaceId)
+      return sameRoot(row && row.path, agent.canonicalRoot) || (id != null && String(id) === String(agent.workspaceId))
+    })
     if (exists) continue
     try {
       const workspace = await create.call(ctx.workspaceRegistry, agent.canonicalRoot, agent.title || agent.slug)
       created += 1
-      if (workspace && workspace.id && String(workspace.id) !== String(agent.workspaceId)) {
-        const row = { ...agent, workspaceId: String(workspace.id) }
+      const createdId = workspace && (workspace.id != null ? workspace.id : workspace.workspaceId)
+      if (createdId && String(createdId) !== String(agent.workspaceId)) {
+        const row = { ...agent, workspaceId: String(createdId) }
         next = { ...next, agents: { ...next.agents, [agent.agentId]: row } }
       }
     } catch { /* path missing or registry refused */ }

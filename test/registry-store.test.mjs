@@ -320,6 +320,7 @@ test('two workspaces stay isolated; symlink path still finds the same agent', as
   const alias = join(home, 'alias-one')
   await symlink(one, alias)
   assert.equal(sameRoot(one, alias), true)
+  assert.equal(sameRoot('C:\\Users\\qin\\Projects\\app', 'C:/Users/qin/Projects/app'), true)
   assert.equal(explainAgent(second.registry, workspaces, { path: alias }).agentId, first.agent.agentId)
   assert.equal(explainAgent(second.registry, workspaces, { path: two }).agentId, second.agent.agentId)
 })
@@ -787,6 +788,9 @@ test('claw helpers hide bound workspaces and preset picker labels', () => {
   assert.equal(isClawWorkspaceFact({ title: 'DSH', path: '/Users/qin/DSH' }, keys), false)
   assert.equal(isClawPresetMenuLabel('claw区agent模板 · 自定义', clawHideNames(projected)), true)
   assert.equal(isClawPresetMenuLabel('标准模式', clawHideNames(projected)), false)
+  assert.equal(isClawPresetMenuLabel('标准模式', new Set(['标准'])), false)
+  assert.equal(isClawPresetMenuLabel('工作区', new Set(['工作'])), false)
+  assert.equal(isClawPresetMenuLabel('会话', new Set(['会'])), false)
   const names = clawHideNames({
     agents: [
       { title: 'test1', slug: 'test1', status: 'active', workspacePresent: true },

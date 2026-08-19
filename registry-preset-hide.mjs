@@ -43,6 +43,22 @@ const SEAT_HINTS = [
 
 export const PRESET_HIDE_ATTR = 'data-dar-claw-preset'
 
+function nearestPresetCard(code) {
+  if (!code || typeof code.closest !== 'function') return null
+  const li = code.closest('li')
+  if (li) return li
+  let node = code.parentElement
+  for (let i = 0; i < 5 && node; i++) {
+    const cls = String(node.className || '')
+    if (/(^|[^a-zA-Z])card([^a-zA-Z]|$)/i.test(cls)) {
+      const codes = typeof node.querySelectorAll === 'function' ? node.querySelectorAll('code') : []
+      if (codes.length <= 1) return node
+    }
+    node = node.parentElement
+  }
+  return null
+}
+
 function mark(el, hide) {
   if (el == null) return
   const current = el.getAttribute(PRESET_HIDE_ATTR) === '1'
@@ -59,7 +75,7 @@ export function hideClawPresetSurfaces(doc, ids, names) {
     const code = codes[i]
     if (code.closest('.dar-page')) continue
     const id = String(code.textContent || '').trim()
-    const card = code.closest('li') || code.closest('[class*="card"]')
+    const card = nearestPresetCard(code)
     mark(card, idSet.has(id) || isClawPresetId(id))
   }
   const items = doc.querySelectorAll('[role="menuitem"]')
@@ -69,7 +85,10 @@ export function hideClawPresetSurfaces(doc, ids, names) {
     const hide = isClawPresetMenuLabel(item.textContent, nameSet)
     mark(item, hide)
     const wrap = item.parentElement
-    if (wrap && wrap.getAttribute && wrap.getAttribute('role') !== 'menu') mark(wrap, hide)
+    if (wrap && wrap.getAttribute && wrap.getAttribute('role') !== 'menu') {
+      const kids = typeof wrap.querySelectorAll === 'function' ? wrap.querySelectorAll('[role="menuitem"]') : null
+      if (!kids || kids.length <= 1) mark(wrap, hide)
+    }
   }
   const options = doc.querySelectorAll('option')
   for (let i = 0; i < options.length; i++) {
@@ -183,7 +202,7 @@ export function blockClawDefaultClick(event, ids, lockSeat, names) {
     event.stopPropagation()
     return true
   }
-  const card = target.closest('li') || target.closest('[class*="card"]')
+  const card = nearestPresetCard(target)
   if (card == null) return false
   const code = card.querySelector('code')
   const id = code == null ? '' : String(code.textContent || '').trim()

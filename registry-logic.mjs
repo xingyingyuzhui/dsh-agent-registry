@@ -1,22 +1,25 @@
 // Join official workspaces with durable bindings. No permission changes.
 
 import { realpathSync } from 'node:fs'
+import { join } from 'node:path'
 import { projectAgent, refreshBinding, setAgentModel, setAgentPolicy, setAgentSkills, setStatus } from './registry-store.mjs'
+import { normalizePathKey } from './registry-view.mjs'
 
 export function sameRoot(a, b) {
   if (!a || !b) return false
   if (a === b) return true
   try {
-    return realpathSync(String(a)) === realpathSync(String(b))
-  } catch {
-    return false
-  }
+    if (realpathSync(String(a)) === realpathSync(String(b))) return true
+  } catch { /* missing path */ }
+  return normalizePathKey(a) === normalizePathKey(b)
 }
 
 export function workspaceIndex(workspaces) {
   const byId = new Map()
   for (const workspace of workspaces || []) {
-    if (workspace && workspace.id != null) byId.set(String(workspace.id), workspace)
+    if (!workspace) continue
+    const id = workspace.id != null ? workspace.id : workspace.workspaceId
+    if (id != null) byId.set(String(id), workspace)
   }
   return byId
 }
@@ -37,17 +40,17 @@ export function syncBindings(registry, workspaces, now) {
 export function identityPaths(dshHome, agentId, agent) {
   const root = agent && agent.canonicalRoot
     ? String(agent.canonicalRoot)
-    : [dshHome, 'workspace-agents', agentId].join('/').replace(/\/+/g, '/')
+    : join(dshHome, 'workspace-agents', agentId)
   return {
     root,
-    agents: root + '/AGENTS.md',
-    soul: root + '/SOUL.md',
-    tools: root + '/TOOLS.md',
-    identity: root + '/IDENTITY.md',
-    user: root + '/USER.md',
-    heartbeat: root + '/HEARTBEAT.md',
-    memory: root + '/MEMORY.md',
-    policy: root + '/policy.json',
+    agents: join(root, 'AGENTS.md'),
+    soul: join(root, 'SOUL.md'),
+    tools: join(root, 'TOOLS.md'),
+    identity: join(root, 'IDENTITY.md'),
+    user: join(root, 'USER.md'),
+    heartbeat: join(root, 'HEARTBEAT.md'),
+    memory: join(root, 'MEMORY.md'),
+    policy: join(root, 'policy.json'),
   }
 }
 

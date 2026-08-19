@@ -106,10 +106,11 @@ export function isClawWorkspaceFact(fact, keys) {
 function menuLabelStartsWithName(label, name) {
   if (!label || !name) return false
   if (label === name) return true
-  if (label.indexOf(name + ' ·') === 0) return true
+  if (label.indexOf(name + ' ·') === 0 || label.indexOf(name + ' ') === 0) return true
   if (label.indexOf(name) !== 0) return false
   const next = label.charAt(name.length)
-  return next === ' ' || next === '·' || !/[A-Za-z0-9_-]/.test(next)
+  if (/[A-Za-z0-9_-]/.test(next)) return false
+  return label.length >= name.length + 12
 }
 
 export function isClawPresetMenuLabel(text, names) {
@@ -179,8 +180,9 @@ export function agentForSession(projected, sessionId, session) {
   }
   const cwd = session && (session.cwd || session.path)
   if (cwd) {
+    const key = normalizePathKey(cwd)
     for (let i = 0; i < agents.length; i++) {
-      if (agents[i].canonicalRoot && agents[i].canonicalRoot === cwd) return agents[i]
+      if (agents[i].canonicalRoot && normalizePathKey(agents[i].canonicalRoot) === key) return agents[i]
     }
   }
   return null

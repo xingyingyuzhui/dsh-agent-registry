@@ -1,4 +1,4 @@
-import { isDsClawPath } from './registry-view.mjs'
+import { isDsClawPath, normalizePathKey } from './registry-view.mjs'
 import { isClawPresetId } from './registry-presets.mjs'
 
 export function normalizeModel(raw) {
@@ -33,7 +33,7 @@ export function findClawAgent(registry, query) {
   const preset = query && query.preset ? String(query.preset) : ''
   for (const row of rows) {
     if (!row || row.status === 'archived') continue
-    if (cwd && row.canonicalRoot === cwd) return row
+    if (cwd && row.canonicalRoot && normalizePathKey(row.canonicalRoot) === normalizePathKey(cwd)) return row
   }
   if (preset && isClawPresetId(preset)) {
     for (const row of rows) {
