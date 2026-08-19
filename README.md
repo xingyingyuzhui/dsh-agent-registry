@@ -25,7 +25,7 @@ dsh plugin --profile web add link:/abs/path/to/dsh-agent-registry
 ## 这一层做什么
 
 - 只有在 Claw区显式创建的 Agent 才会出现在 Claw区；普通项目工作区留在「工作区」
-- 每个 Claw Agent：名字 → 名下会话；目录在 `~/.dsh/DSclaw/<slug>/`（含 SOUL.md / AGENTS.md / USER.md）
+- 每个 Claw Agent：管理名（文件夹）→ 名下会话；目录在 `~/.dsh/DSclaw/<slug>/`。它自己叫什么写在 `IDENTITY.md`，第一次对话按 `BOOTSTRAP.md` 问用户，不问就把文件夹名当成自称
 - 左侧会话区标题是两个按钮：**工作区** / **Claw区**，用来切换分区
 - 创建时从用户预设模板 `wa-template`（显示名 **claw区agent模板**）复制出 `wa-<slug>` 并绑定；新会话直接带上这个预设
 - 人设注入需要另装 `dsh-agent-identity`
