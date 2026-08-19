@@ -1,4 +1,4 @@
-import { isClawPresetId, isClawWorkspaceFact, isDsClawPath } from './registry-view.mjs'
+import { isClawPresetId, isClawWorkspaceFact, isDsClawPath, normalizePathKey, pathSetHas } from './registry-view.mjs'
 
 export function shouldShowClawRoster() {
   return false
@@ -6,15 +6,17 @@ export function shouldShowClawRoster() {
 
 export function isOfficialWorkspaceItem(item, keys) {
   if (item == null) return false
-  if (isDsClawPath(item.path || item.cwd || '')) return false
-  if (keys && isClawWorkspaceFact(item, keys)) return false
+  const raw = item.path || item.cwd || ''
+  if (isDsClawPath(raw)) return false
+  if (keys && item.workspaceId && keys.workspaceIds && keys.workspaceIds.has(String(item.workspaceId))) return false
+  if (raw && keys && pathSetHas(keys.paths, raw)) return false
   return true
 }
 
 export function itemOwnsCurrentSession(item, keys) {
   if (item == null || keys == null) return false
   const currentId = keys.currentSessionId ? String(keys.currentSessionId) : ''
-  const currentCwd = keys.currentCwd ? String(keys.currentCwd).replace(/\\/g, '/') : ''
+  const currentCwd = keys.currentCwd ? normalizePathKey(keys.currentCwd) : ''
   if (currentId) {
     const rows = item.sessionIds
     if (Array.isArray(rows)) {
@@ -24,7 +26,7 @@ export function itemOwnsCurrentSession(item, keys) {
     }
   }
   if (!currentCwd || !isDsClawPath(currentCwd)) return false
-  const path = String(item.path || item.cwd || '').replace(/\\/g, '/')
+  const path = normalizePathKey(item.path || item.cwd || '')
   if (!path) return false
   return path === currentCwd || currentCwd.indexOf(path + '/') === 0 || path.indexOf(currentCwd + '/') === 0
 }

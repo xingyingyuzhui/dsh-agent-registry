@@ -33,9 +33,26 @@ export function clawHideNames(projected) {
   return names
 }
 
+export function normalizePathKey(path) {
+  return String(path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+export function pathSetHas(paths, path) {
+  if (!paths || !path) return false
+  if (typeof paths.has === 'function' && paths.has(path)) return true
+  const key = normalizePathKey(path)
+  if (!key) return false
+  if (typeof paths.has === 'function' && paths.has(key)) return true
+  if (typeof paths[Symbol.iterator] !== 'function') return false
+  for (const item of paths) {
+    if (normalizePathKey(item) === key) return true
+  }
+  return false
+}
+
 export function isDsClawPath(path) {
   if (typeof path !== 'string' || path === '') return false
-  return /(^|\/)DSclaw(\/|$)/.test(path.replace(/\\/g, '/'))
+  return /(^|\/)dsclaw(\/|$)/i.test(path.replace(/\\/g, '/'))
 }
 
 export function clawHideKeys(projected) {
@@ -48,7 +65,10 @@ export function clawHideKeys(projected) {
     if (!agent) continue
     if (agent.title) titles.add(String(agent.title))
     if (agent.slug) slugs.add(String(agent.slug))
-    if (agent.canonicalRoot) paths.add(String(agent.canonicalRoot))
+    if (agent.canonicalRoot) {
+      paths.add(String(agent.canonicalRoot))
+      paths.add(normalizePathKey(agent.canonicalRoot))
+    }
     if (agent.workspaceId) workspaceIds.add(String(agent.workspaceId))
     const ids = agent.sessionIds || []
     for (let i = 0; i < ids.length; i++) sessionIds.add(String(ids[i]))
@@ -69,7 +89,8 @@ export function isClawWorkspaceFact(fact, keys) {
   if (fact == null || keys == null) return false
   if (fact.title && shouldHideOfficialGroup(fact.title, keys)) return true
   if (fact.workspaceId && keys.workspaceIds && keys.workspaceIds.has(String(fact.workspaceId))) return true
-  if (fact.path && keys.paths && keys.paths.has(String(fact.path))) return true
+  if (fact.path && pathSetHas(keys.paths, fact.path)) return true
+  if (fact.cwd && pathSetHas(keys.paths, fact.cwd)) return true
   if (isDsClawPath(fact.path || fact.cwd || '')) return true
   if (fact.sessionId && keys.sessionIds && keys.sessionIds.has(String(fact.sessionId))) return true
   return false

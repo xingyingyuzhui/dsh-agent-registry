@@ -1332,9 +1332,26 @@ function clawHideNames(projected) {
   return names
 }
 
+function normalizePathKey(path) {
+  return String(path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+function pathSetHas(paths, path) {
+  if (!paths || !path) return false
+  if (typeof paths.has === 'function' && paths.has(path)) return true
+  const key = normalizePathKey(path)
+  if (!key) return false
+  if (typeof paths.has === 'function' && paths.has(key)) return true
+  if (typeof paths[Symbol.iterator] !== 'function') return false
+  for (const item of paths) {
+    if (normalizePathKey(item) === key) return true
+  }
+  return false
+}
+
 function isDsClawPath(path) {
   if (typeof path !== 'string' || path === '') return false
-  return /(^|\/)DSclaw(\/|$)/.test(path.replace(/\\/g, '/'))
+  return /(^|\/)dsclaw(\/|$)/i.test(path.replace(/\\/g, '/'))
 }
 
 function clawHideKeys(projected) {
@@ -1347,7 +1364,10 @@ function clawHideKeys(projected) {
     if (!agent) continue
     if (agent.title) titles.add(String(agent.title))
     if (agent.slug) slugs.add(String(agent.slug))
-    if (agent.canonicalRoot) paths.add(String(agent.canonicalRoot))
+    if (agent.canonicalRoot) {
+      paths.add(String(agent.canonicalRoot))
+      paths.add(normalizePathKey(agent.canonicalRoot))
+    }
     if (agent.workspaceId) workspaceIds.add(String(agent.workspaceId))
     const ids = agent.sessionIds || []
     for (let i = 0; i < ids.length; i++) sessionIds.add(String(ids[i]))
@@ -1368,7 +1388,8 @@ function isClawWorkspaceFact(fact, keys) {
   if (fact == null || keys == null) return false
   if (fact.title && shouldHideOfficialGroup(fact.title, keys)) return true
   if (fact.workspaceId && keys.workspaceIds && keys.workspaceIds.has(String(fact.workspaceId))) return true
-  if (fact.path && keys.paths && keys.paths.has(String(fact.path))) return true
+  if (fact.path && pathSetHas(keys.paths, fact.path)) return true
+  if (fact.cwd && pathSetHas(keys.paths, fact.cwd)) return true
   if (isDsClawPath(fact.path || fact.cwd || '')) return true
   if (fact.sessionId && keys.sessionIds && keys.sessionIds.has(String(fact.sessionId))) return true
   return false
@@ -3217,27 +3238,34 @@ function officialRowFact(el) {
   if (stamped) fact.sessionId = stamped
   let fiber = reactFiber(el)
   let hops = 0
+  let seenGroup = false
+  let seenNode = false
   while (fiber != null && hops < 80) {
     const props = fiber.memoizedProps || fiber.pendingProps
     if (props != null) {
       const group = props.group
-      if (group != null) {
-        if (group.label) fact.title = fact.title || String(group.label)
-        if (group.workspaceId != null) fact.workspaceId = String(group.workspaceId)
-        if (group.cwd) fact.cwd = String(group.cwd)
-        if (group.path) fact.path = String(group.path)
+      if (group != null && !seenGroup) {
+        seenGroup = true
+        if (group.label && !fact.title) fact.title = String(group.label)
+        if (group.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(group.workspaceId)
+        if (group.cwd && !fact.cwd) fact.cwd = String(group.cwd)
+        if (group.path && !fact.path) fact.path = String(group.path)
       }
       const node = props.node
-      if (node != null) {
-        if (node.id) fact.sessionId = fact.sessionId || String(node.id)
-        if (node.cwd) fact.cwd = fact.cwd || String(node.cwd)
-        if (node.workspaceId != null) fact.workspaceId = fact.workspaceId || String(node.workspaceId)
+      if (node != null && !seenNode) {
+        seenNode = true
+        if (node.id && !fact.sessionId) fact.sessionId = String(node.id)
+        if (node.cwd && !fact.cwd) fact.cwd = String(node.cwd)
+        if (node.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(node.workspaceId)
       }
-      if (props.workspaceId != null) fact.workspaceId = fact.workspaceId || String(props.workspaceId)
-      if (props.sessionId) fact.sessionId = fact.sessionId || String(props.sessionId)
-      if (props.path) fact.path = fact.path || String(props.path)
-      if (props.cwd) fact.cwd = fact.cwd || String(props.cwd)
+      if (!seenGroup) {
+        if (props.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(props.workspaceId)
+        if (props.path && !fact.path) fact.path = String(props.path)
+        if (props.cwd && !fact.cwd) fact.cwd = String(props.cwd)
+      }
+      if (props.sessionId && !fact.sessionId) fact.sessionId = String(props.sessionId)
     }
+    if (seenGroup && (fact.sessionId || seenNode || hops > 12)) break
     fiber = fiber.return
     hops += 1
   }
@@ -4351,15 +4379,17 @@ function shouldShowClawRoster() {
 
 function isOfficialWorkspaceItem(item, keys) {
   if (item == null) return false
-  if (isDsClawPath(item.path || item.cwd || '')) return false
-  if (keys && isClawWorkspaceFact(item, keys)) return false
+  const raw = item.path || item.cwd || ''
+  if (isDsClawPath(raw)) return false
+  if (keys && item.workspaceId && keys.workspaceIds && keys.workspaceIds.has(String(item.workspaceId))) return false
+  if (raw && keys && pathSetHas(keys.paths, raw)) return false
   return true
 }
 
 function itemOwnsCurrentSession(item, keys) {
   if (item == null || keys == null) return false
   const currentId = keys.currentSessionId ? String(keys.currentSessionId) : ''
-  const currentCwd = keys.currentCwd ? String(keys.currentCwd).replace(/\\/g, '/') : ''
+  const currentCwd = keys.currentCwd ? normalizePathKey(keys.currentCwd) : ''
   if (currentId) {
     const rows = item.sessionIds
     if (Array.isArray(rows)) {
@@ -4369,7 +4399,7 @@ function itemOwnsCurrentSession(item, keys) {
     }
   }
   if (!currentCwd || !isDsClawPath(currentCwd)) return false
-  const path = String(item.path || item.cwd || '').replace(/\\/g, '/')
+  const path = normalizePathKey(item.path || item.cwd || '')
   if (!path) return false
   return path === currentCwd || currentCwd.indexOf(path + '/') === 0 || path.indexOf(currentCwd + '/') === 0
 }

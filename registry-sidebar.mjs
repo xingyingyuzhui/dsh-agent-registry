@@ -62,27 +62,34 @@ export function officialRowFact(el) {
   if (stamped) fact.sessionId = stamped
   let fiber = reactFiber(el)
   let hops = 0
+  let seenGroup = false
+  let seenNode = false
   while (fiber != null && hops < 80) {
     const props = fiber.memoizedProps || fiber.pendingProps
     if (props != null) {
       const group = props.group
-      if (group != null) {
-        if (group.label) fact.title = fact.title || String(group.label)
-        if (group.workspaceId != null) fact.workspaceId = String(group.workspaceId)
-        if (group.cwd) fact.cwd = String(group.cwd)
-        if (group.path) fact.path = String(group.path)
+      if (group != null && !seenGroup) {
+        seenGroup = true
+        if (group.label && !fact.title) fact.title = String(group.label)
+        if (group.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(group.workspaceId)
+        if (group.cwd && !fact.cwd) fact.cwd = String(group.cwd)
+        if (group.path && !fact.path) fact.path = String(group.path)
       }
       const node = props.node
-      if (node != null) {
-        if (node.id) fact.sessionId = fact.sessionId || String(node.id)
-        if (node.cwd) fact.cwd = fact.cwd || String(node.cwd)
-        if (node.workspaceId != null) fact.workspaceId = fact.workspaceId || String(node.workspaceId)
+      if (node != null && !seenNode) {
+        seenNode = true
+        if (node.id && !fact.sessionId) fact.sessionId = String(node.id)
+        if (node.cwd && !fact.cwd) fact.cwd = String(node.cwd)
+        if (node.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(node.workspaceId)
       }
-      if (props.workspaceId != null) fact.workspaceId = fact.workspaceId || String(props.workspaceId)
-      if (props.sessionId) fact.sessionId = fact.sessionId || String(props.sessionId)
-      if (props.path) fact.path = fact.path || String(props.path)
-      if (props.cwd) fact.cwd = fact.cwd || String(props.cwd)
+      if (!seenGroup) {
+        if (props.workspaceId != null && !fact.workspaceId) fact.workspaceId = String(props.workspaceId)
+        if (props.path && !fact.path) fact.path = String(props.path)
+        if (props.cwd && !fact.cwd) fact.cwd = String(props.cwd)
+      }
+      if (props.sessionId && !fact.sessionId) fact.sessionId = String(props.sessionId)
     }
+    if (seenGroup && (fact.sessionId || seenNode || hops > 12)) break
     fiber = fiber.return
     hops += 1
   }

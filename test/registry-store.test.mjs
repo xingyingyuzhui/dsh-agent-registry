@@ -47,10 +47,11 @@ import {
   sessionStamp,
   shouldHideOfficialGroup,
 } from '../registry-view.mjs'
-import { applyClawHeaderActions, applyClawSearchInput, applyOfficialSearchHide, applyZoneVisibility, CLAW_ACTIONS_ATTR, CLAW_ATTR, findHeaderActions, findOfficialSearchInput, readOfficialSearchQuery, SEARCH_HIDE_ATTR, TREE_HIDE_ATTR, ZONE_HIDE_ATTR } from '../registry-sidebar.mjs'
+import { applyClawHeaderActions, applyClawSearchInput, applyOfficialSearchHide, applyZoneVisibility, CLAW_ACTIONS_ATTR, CLAW_ATTR, findHeaderActions, findOfficialSearchInput, officialRowFact, readOfficialSearchQuery, SEARCH_HIDE_ATTR, TREE_HIDE_ATTR, ZONE_HIDE_ATTR } from '../registry-sidebar.mjs'
 import {
   filterOfficialPresetRoster,
   isolateWorkspaceSnapshot,
+  isOfficialWorkspaceItem,
   shouldShowClawRoster,
   wrapPresetList,
   wrapWorkspaceList,
@@ -638,6 +639,47 @@ test('wrapped workspace list never publishes DSclaw rows', () => {
   stop()
 })
 
+test('official win projects stay visible even when a Claw agent reuses the title', () => {
+  const keys = clawHideKeys({
+    agents: [{
+      title: 'app', slug: 'app', workspaceId: 'claw-id',
+      canonicalRoot: 'C:\\Users\\qin\\.dsh\\DSclaw\\app',
+      sessionIds: ['session-claw'],
+    }],
+  })
+  const official = { workspaceId: 'proj-id', title: 'app', path: 'C:\\Users\\qin\\Projects\\app', sessionIds: ['session-proj'] }
+  const claw = { workspaceId: 'claw-id', title: 'app', path: 'C:\\Users\\qin\\.dsh\\dsclaw\\app', sessionIds: ['session-claw'] }
+  assert.equal(isOfficialWorkspaceItem(official, keys), true)
+  assert.equal(isOfficialWorkspaceItem(claw, keys), false)
+  const next = isolateWorkspaceSnapshot({ items: [official, claw], archivedSessionIds: [] }, keys)
+  assert.deepEqual(next.items.map((row) => row.workspaceId), ['proj-id'])
+  assert.equal(next.archivedSessionIds.includes('session-claw'), true)
+  assert.equal(next.archivedSessionIds.includes('session-proj'), false)
+})
+
+test('officialRowFact keeps the nearest group, not an ancestor Claw workspace', () => {
+  const leaf = {
+    memoizedProps: {
+      group: { label: 'MyProject', workspaceId: 'w-official', path: 'C:\\Users\\qin\\Projects\\app' },
+    },
+    return: {
+      memoizedProps: {
+        group: { label: 'bot1', workspaceId: 'w-claw', path: 'C:\\Users\\qin\\.dsh\\DSclaw\\bot1' },
+      },
+      return: null,
+    },
+  }
+  const el = {
+    querySelector() { return null },
+    getAttribute() { return '' },
+    __reactFiber$test: leaf,
+  }
+  const fact = officialRowFact(el)
+  assert.equal(fact.workspaceId, 'w-official')
+  assert.equal(fact.path, 'C:\\Users\\qin\\Projects\\app')
+  assert.equal(fact.title, 'MyProject')
+})
+
 test('claw helpers hide bound workspaces and preset picker labels', () => {
   const projected = {
     agents: [
@@ -652,7 +694,9 @@ test('claw helpers hide bound workspaces and preset picker labels', () => {
   assert.equal(shouldHideOfficialGroup('DSH', clawHideNames(projected)), true)
   assert.equal(shouldHideOfficialGroup('未分组', clawHideNames(projected)), false)
   assert.equal(isDsClawPath('/Users/qin/.dsh/DSclaw/test1'), true)
+  assert.equal(isDsClawPath('C:\\\\Users\\\\qin\\\\.dsh\\\\dsclaw\\\\bot1'), true)
   assert.equal(isDsClawPath('/Users/qin/DSH'), false)
+  assert.equal(isDsClawPath('C:\\\\Users\\\\qin\\\\Projects\\\\app'), false)
   const keys = clawHideKeys({
     agents: [{
       title: 'test1', slug: 'test1', status: 'active', workspacePresent: true,
