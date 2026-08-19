@@ -203,7 +203,6 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
         agent && !agent.workspacePresent ? el('p', { className: 'dar-note' }, t('missingWorkspace')) : null,
         el('div', { className: 'dar-leave' },
           el('div', { className: 'dar-fact-k' }, t('leaveBehind')),
-          el('p', { className: 'dar-note' }, t('leaveBehindHint')),
           el('div', { className: 'dar-segs' }, ['archive', 'transfer', 'delete'].map((id) => el('button', {
             key: id,
             type: 'button',
@@ -212,7 +211,6 @@ export function createSettingsPage(React, t, post, toast, subscribeLocale, React
             disabled: busy,
             onClick() { saveLeaveBehind(id) },
           }, t('leaveBehind' + id.charAt(0).toUpperCase() + id.slice(1))))),
-          el('p', { className: 'dar-note' }, t('leaveBehind' + leaveBehind.charAt(0).toUpperCase() + leaveBehind.slice(1) + 'Hint')),
         ),
       )
     }

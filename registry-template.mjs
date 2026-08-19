@@ -194,7 +194,6 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
       const spec = specOf(coreFile)
       const dirty = persona[spec.key] !== personaSaved[spec.key]
       return el('div', { className: 'dar-panel-body' },
-        el('p', { className: 'dar-note' }, t('templatePersonaHint')),
         el('div', { className: 'dar-pick-wrap dar-pick-block' },
           el('button', {
             type: 'button',
@@ -256,7 +255,6 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
       const settings = (vault && vault.settings) || { writeApproval: false, review: { enabled: true } }
       const reviewOn = !(settings.review && settings.review.enabled === false)
       return el('div', { className: 'dar-panel-body' },
-        el('p', { className: 'dar-note' }, t('templateMemoryHint')),
         permField(t('memWrite'), segs(settings.writeApproval ? 'ask' : 'free', [
           { id: 'free', label: t('memWriteFree') },
           { id: 'ask', label: t('memWriteAsk') },
@@ -288,7 +286,6 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
       const effortText = effortLabel(reasoning, live && live.reasoningEffort, '')
       const empty = !catalog.groups || catalog.groups.every((group) => !group.models || group.models.length === 0)
       return el('div', { className: 'dar-panel-body' },
-        el('p', { className: 'dar-note' }, t('templateModelHint')),
         el('div', { className: 'dar-perm-item', 'data-span': '2' },
           el('div', { className: 'dar-perm-k' }, t('modelDefault')),
           el('div', { className: 'dar-ms', ref: modelRootRef, 'data-dar-ms': '1' },
@@ -358,7 +355,6 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
     function permissionsPanel() {
       const cap = clawHardCap()
       return el('div', { className: 'dar-panel-body' },
-        el('p', { className: 'dar-note' }, t('templateHatch')),
         el('div', { className: 'dar-perm-grid' },
           permField(t('preset'), segs(currentPolicy.preset, AGENT_PRESET_IDS.map((id) => ({ id, label: t('preset_' + id) })), (id) => {
             setPolicy(clampClawPolicy(applyPreset(id)))
@@ -419,7 +415,6 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
     function skillsPanel() {
       const denied = new Set(((template.skills && template.skills.deny) || []))
       return el('div', { className: 'dar-panel-body' },
-        el('p', { className: 'dar-note' }, t('templateSkillsHint')),
         skillItems.length === 0
           ? el('p', { className: 'dar-empty' }, t('skillsEmpty'))
           : el('div', { className: 'dar-cards' }, skillItems.map((item) => {
@@ -505,7 +500,6 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
 
     return el('div', { className: 'dar-page' },
       el('h2', { className: 'dar-title' }, t('tabTemplate')),
-      el('p', { className: 'dar-intro' }, t('templateHint')),
       error ? el('p', { className: 'dar-note' }, error) : null,
       el('div', { className: 'dar-tabs', role: 'tablist', 'aria-label': t('tabs') },
         TEMPLATE_TABS.map((id) => el('button', {
@@ -522,7 +516,7 @@ export function createTemplatePage(React, t, post, toast, subscribeLocale, React
       resetConfirm ? el('div', { className: 'dar-overlay', onClick() { setResetConfirm(false) } },
         el('div', { className: 'dar-dialog', onClick(e) { e.stopPropagation() } },
           el('div', { className: 'dar-dialog-head' }, t('resetTitle', { file: spec.file })),
-          el('div', { className: 'dar-dialog-body' }, t('templateResetBody')),
+          el('div', { className: 'dar-dialog-body' }, t('resetBody')),
           el('div', { className: 'dar-dialog-actions' },
             el('button', { type: 'button', className: 'dar-btn', onClick() { setResetConfirm(false) } }, t('cancel')),
             el('button', {
